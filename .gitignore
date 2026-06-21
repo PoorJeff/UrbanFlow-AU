@@ -1,2 +1,36 @@
 # Local worktrees
 .worktrees/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Test and quality caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local data and generated artifacts
+data/raw/
+data/interim/
+data/processed/
+data/cache/
+models/*
+!models/.gitkeep
+mlruns/
