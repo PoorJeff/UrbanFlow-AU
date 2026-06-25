@@ -11,6 +11,8 @@ UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand 
 
 The complete product scope is documented in [urbanflow-au_requirements.md](urbanflow-au_requirements.md). The foundation design is in [docs/superpowers/specs/2026-06-20-project-foundation-design.md](docs/superpowers/specs/2026-06-20-project-foundation-design.md).
 
+The project development workflow is documented in [docs/development_workflow.md](docs/development_workflow.md).
+
 ## Local development
 
 ```powershell
