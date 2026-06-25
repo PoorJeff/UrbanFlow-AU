@@ -9,7 +9,10 @@ description = "Melbourne pedestrian demand forecasting and MLOps platform"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "UrbanFlow AU contributors" }]
-dependencies = []
+dependencies = [
+    "httpx>=0.28,<1",
+    "tenacity>=9,<10",
+]
 
 [project.optional-dependencies]
 dev = [
