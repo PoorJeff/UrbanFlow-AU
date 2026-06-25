@@ -53,7 +53,9 @@ class SensorLocation:
 def parse_sensor_location(record: dict[str, Any]) -> SensorLocation:
     for field in REQUIRED_FIELDS:
         if field not in record or record[field] is None:
-            raise SensorLocationParseError(f"Sensor location record is missing required field '{field}'")
+            raise SensorLocationParseError(
+                f"Sensor location record is missing required field '{field}'"
+            )
 
     location_id = _coerce_int(record["location_id"], "location_id")
     latitude = _coerce_float(record["latitude"], "latitude")
