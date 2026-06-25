@@ -32,7 +32,7 @@ python -m pytest
 
 ## Planned delivery slices
 
-1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is the first functional slice.
+1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion now has a tested Python function entry point.
 2. Data validation, PostgreSQL persistence, and Prefect orchestration.
 3. Leakage-safe features, rolling-origin backtests, and MLflow tracking.
 4. FastAPI forecasts, Streamlit operations views, and Evidently monitoring.
