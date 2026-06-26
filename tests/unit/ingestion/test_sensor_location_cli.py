@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -111,3 +113,19 @@ def test_main_rejects_non_positive_page_limit(capsys: pytest.CaptureFixture[str]
 
     assert exc_info.value.code == 2
     assert "page limit must be greater than zero" in capsys.readouterr().err
+
+
+def test_runner_script_displays_help() -> None:
+    repository_root = Path(__file__).parents[3]
+
+    completed_process = subprocess.run(
+        [sys.executable, repository_root / "scripts" / "ingest_sensor_locations.py", "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed_process.returncode == 0
+    assert "--raw-root" in completed_process.stdout
+    assert "--manifest-root" in completed_process.stdout
+    assert "--page-limit" in completed_process.stdout

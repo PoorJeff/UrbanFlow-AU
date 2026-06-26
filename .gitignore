@@ -28,6 +28,7 @@ Thumbs.db
 
 # Local data and generated artifacts
 data/raw/
+data/manifests/
 data/interim/
 data/processed/
 data/cache/

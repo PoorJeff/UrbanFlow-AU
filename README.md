@@ -30,6 +30,18 @@ python -m ruff format --check .
 python -m pytest
 ```
 
+## Run sensor-location ingestion locally
+
+```powershell
+python scripts/ingest_sensor_locations.py
+```
+
+The command fetches the current City of Melbourne sensor-location dataset and
+prints a JSON summary. By default it writes an immutable snapshot below
+`data/raw/` and a matching manifest below `data/manifests/`; both are ignored
+by Git. Use `--raw-root`, `--manifest-root`, or `--page-limit` to override the
+defaults.
+
 ## Planned delivery slices
 
 1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion now has a tested Python function entry point.
