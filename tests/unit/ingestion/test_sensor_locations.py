@@ -49,6 +49,15 @@ def test_parse_sensor_location_rejects_missing_required_field() -> None:
         parse_sensor_location(record)
 
 
+def test_parse_sensor_location_preserves_null_installation_date() -> None:
+    record = {**SOURCE_RECORD, "installation_date": None}
+
+    sensor = parse_sensor_location(record)
+
+    assert sensor.installation_date is None
+    assert sensor.to_dict()["installation_date"] is None
+
+
 def test_parse_sensor_location_rejects_invalid_coordinates() -> None:
     record = dict(SOURCE_RECORD)
     record["latitude"] = -120

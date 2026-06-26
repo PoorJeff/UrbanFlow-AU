@@ -7,7 +7,6 @@ REQUIRED_FIELDS = (
     "location_id",
     "sensor_description",
     "sensor_name",
-    "installation_date",
     "status",
     "latitude",
     "longitude",
@@ -23,7 +22,7 @@ class SensorLocation:
     location_id: int
     sensor_description: str
     sensor_name: str
-    installation_date: str
+    installation_date: str | None
     status: str
     latitude: float
     longitude: float
@@ -66,7 +65,7 @@ def parse_sensor_location(record: dict[str, Any]) -> SensorLocation:
         location_id=location_id,
         sensor_description=str(record["sensor_description"]),
         sensor_name=str(record["sensor_name"]),
-        installation_date=str(record["installation_date"]),
+        installation_date=_optional_str(record.get("installation_date")),
         status=str(record["status"]),
         latitude=latitude,
         longitude=longitude,
