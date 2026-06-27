@@ -825,7 +825,7 @@ def test_hourly_count_snapshot_passes_and_records_metrics(tmp_path):
     assert payload["metrics"]["hour_distribution"]["0"] == 1
 
 
-def test_hourly_count_snapshot_fails_for_duplicate_id(tmp_path):
+def test_hourly_count_snapshot_warns_for_duplicate_id(tmp_path):
     snapshot_path = _write_csv(
         tmp_path,
         [
@@ -836,8 +836,8 @@ def test_hourly_count_snapshot_fails_for_duplicate_id(tmp_path):
 
     report = validate_hourly_counts_snapshot(snapshot_path)
 
-    assert report.passed is False
-    assert any(issue.code == "DUPLICATE_SOURCE_ID" for issue in report.errors)
+    assert report.passed is True
+    assert any(issue.code == "DUPLICATE_SOURCE_ID" for issue in report.warnings)
 
 
 def test_hourly_count_snapshot_fails_for_hour_range_and_direction_total(tmp_path):
@@ -940,7 +940,7 @@ def _schema_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
     return ()
 
 
-def _duplicate_id_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
+def _duplicate_id_warnings(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
     if "id" not in frame.columns:
         return ()
     duplicate_mask = frame["id"].astype(str).str.strip().duplicated(keep=False)
@@ -950,7 +950,7 @@ def _duplicate_id_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
     return (
         ValidationIssue(
             code="DUPLICATE_SOURCE_ID",
-            message="id values must be unique within an hourly-count snapshot",
+            message="Duplicate source id values need source investigation",
             column="id",
             rows=rows,
         ),
@@ -980,7 +980,7 @@ def _direction_total_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
 
 
 def _diagnostic_warnings(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
-    warnings: list[ValidationIssue] = []
+    warnings = list(_duplicate_id_warnings(frame))
     key_columns = ["location_id", "sensing_date", "hourday"]
     if set(key_columns).issubset(frame.columns):
         duplicate_mask = frame.duplicated(subset=key_columns, keep=False)
@@ -1058,7 +1058,7 @@ def validate_hourly_counts_frame(
     snapshot_path: Path,
     validated_at: datetime | None = None,
 ) -> ValidationReport:
-    errors = _schema_errors(frame) + _duplicate_id_errors(frame) + _direction_total_errors(frame)
+    errors = _schema_errors(frame) + _direction_total_errors(frame)
     return ValidationReport(
         dataset=HOURLY_COUNT_DATASET,
         snapshot_path=str(snapshot_path),

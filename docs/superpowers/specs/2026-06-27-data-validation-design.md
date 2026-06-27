@@ -32,9 +32,10 @@ DataFrames.
 
 One local hourly-count smoke snapshot from 2025-01-01 has already confirmed that
 `hourday` values use the 0-23 range and that `direction_1 + direction_2` matched
-`pedestriancount` for that sample. The validation rules will still treat source-data
-coverage issues as reportable diagnostics rather than silently assuming all future ranges
-are complete.
+`pedestriancount` for that sample. The same smoke snapshot also showed duplicate source
+`id` values caused by ambiguous concatenation patterns, so `id` cannot be treated as a
+raw primary key. The validation rules will still treat source-data coverage issues as
+reportable diagnostics rather than silently assuming all future ranges are complete.
 
 ## Considered Approaches
 
@@ -128,7 +129,7 @@ Hard failures:
   - `pedestriancount`
   - `sensor_name`
   - `location`
-- `id` is non-empty and unique within the snapshot.
+- `id` is non-empty.
 - `location_id` is integer-like and positive.
 - `sensing_date` is parseable as a date.
 - `hourday` is integer-like and between 0 and 23.
@@ -140,9 +141,10 @@ Hard failures:
 
 Diagnostics, not first-version hard failures:
 
-- Duplicate `(location_id, sensing_date, hourday)` keys are counted and reported. The
-  report will fail only if the raw source `id` is duplicated; duplicate sensor-hour keys
-  need source investigation before becoming a hard rule.
+- Duplicate `id` values are counted and reported because the current source export can
+  produce collisions.
+- Duplicate `(location_id, sensing_date, hourday)` keys are counted and reported. These
+  keys need source investigation before becoming a hard rule.
 - Per-day hour coverage by `location_id` is summarized. Missing hours are warnings for
   now because the source may add, retire, or temporarily disable sensors.
 - Date range, row count, number of sensors, and hour distribution are recorded as metrics.

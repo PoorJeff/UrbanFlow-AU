@@ -56,7 +56,7 @@ def _schema_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
     return ()
 
 
-def _duplicate_id_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
+def _duplicate_id_warnings(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
     if "id" not in frame.columns:
         return ()
     duplicate_mask = frame["id"].astype(str).str.strip().duplicated(keep=False)
@@ -66,7 +66,7 @@ def _duplicate_id_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
     return (
         ValidationIssue(
             code="DUPLICATE_SOURCE_ID",
-            message="id values must be unique within an hourly-count snapshot",
+            message="Duplicate source id values need source investigation",
             column="id",
             rows=rows,
         ),
@@ -96,7 +96,7 @@ def _direction_total_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
 
 
 def _diagnostic_warnings(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
-    warnings: list[ValidationIssue] = []
+    warnings = list(_duplicate_id_warnings(frame))
     key_columns = ["location_id", "sensing_date", "hourday"]
     if set(key_columns).issubset(frame.columns):
         duplicate_mask = frame.duplicated(subset=key_columns, keep=False)
@@ -177,7 +177,7 @@ def validate_hourly_counts_frame(
     snapshot_path: Path,
     validated_at: datetime | None = None,
 ) -> ValidationReport:
-    errors = _schema_errors(frame) + _duplicate_id_errors(frame) + _direction_total_errors(frame)
+    errors = _schema_errors(frame) + _direction_total_errors(frame)
     return ValidationReport(
         dataset=HOURLY_COUNT_DATASET,
         snapshot_path=str(snapshot_path),

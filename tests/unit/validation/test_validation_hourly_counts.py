@@ -37,7 +37,7 @@ def test_hourly_count_snapshot_passes_and_records_metrics(tmp_path):
     assert payload["metrics"]["hour_distribution"]["0"] == 1
 
 
-def test_hourly_count_snapshot_fails_for_duplicate_id(tmp_path):
+def test_hourly_count_snapshot_warns_for_duplicate_id(tmp_path):
     snapshot_path = _write_csv(
         tmp_path,
         [
@@ -48,8 +48,8 @@ def test_hourly_count_snapshot_fails_for_duplicate_id(tmp_path):
 
     report = validate_hourly_counts_snapshot(snapshot_path)
 
-    assert report.passed is False
-    assert any(issue.code == "DUPLICATE_SOURCE_ID" for issue in report.errors)
+    assert report.passed is True
+    assert any(issue.code == "DUPLICATE_SOURCE_ID" for issue in report.warnings)
 
 
 def test_hourly_count_snapshot_fails_for_hour_range_and_direction_total(tmp_path):
