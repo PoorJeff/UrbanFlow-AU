@@ -5,7 +5,11 @@ from datetime import UTC, datetime
 import pytest
 
 from urbanflow.ingestion.manifests import write_manifest
-from urbanflow.ingestion.snapshots import format_extracted_at, write_json_snapshot
+from urbanflow.ingestion.snapshots import (
+    format_extracted_at,
+    move_file_snapshot,
+    write_json_snapshot,
+)
 
 EXTRACTED_AT = datetime(2026, 6, 25, 8, 30, 5, tzinfo=UTC)
 RECORDS = [
@@ -80,3 +84,59 @@ def test_write_manifest_records_snapshot_hash_and_counts(tmp_path) -> None:
     assert manifest["source_total_count"] == 136
     assert manifest["snapshot_sha256"] == expected_hash
     assert manifest["snapshot_path"] == snapshot_path.as_posix()
+
+
+def test_move_file_snapshot_places_file_in_immutable_dataset_path(tmp_path) -> None:
+    source_path = tmp_path / "download.tmp"
+    source_path.write_text("id,location_id\n1,3\n", encoding="utf-8")
+
+    snapshot_path = move_file_snapshot(
+        source_path=source_path,
+        root_dir=tmp_path / "raw",
+        dataset="hourly_counts",
+        extracted_at=EXTRACTED_AT,
+        filename="records.csv",
+    )
+
+    assert snapshot_path.as_posix().endswith(
+        "melbourne/hourly_counts/extracted_at=20260625T083005Z/records.csv"
+    )
+    assert snapshot_path.read_text(encoding="utf-8") == "id,location_id\n1,3\n"
+    assert not source_path.exists()
+
+    replacement_source = tmp_path / "replacement.tmp"
+    replacement_source.write_text("id,location_id\n2,4\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        move_file_snapshot(
+            source_path=replacement_source,
+            root_dir=tmp_path / "raw",
+            dataset="hourly_counts",
+            extracted_at=EXTRACTED_AT,
+            filename="records.csv",
+        )
+
+
+def test_write_manifest_includes_optional_metadata(tmp_path) -> None:
+    snapshot_path = tmp_path / "records.csv"
+    snapshot_path.write_text("id,location_id\n1,3\n", encoding="utf-8")
+
+    manifest_path = write_manifest(
+        root_dir=tmp_path / "manifests",
+        dataset="hourly_counts",
+        source_url="https://example.test/datasets/hourly/exports/csv",
+        extracted_at=EXTRACTED_AT,
+        record_count=1,
+        source_total_count=1,
+        snapshot_path=snapshot_path,
+        metadata={
+            "snapshot_format": "csv",
+            "selected_columns": ["id", "location_id"],
+        },
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["metadata"] == {
+        "snapshot_format": "csv",
+        "selected_columns": ["id", "location_id"],
+    }

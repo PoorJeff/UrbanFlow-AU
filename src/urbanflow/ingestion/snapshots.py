@@ -26,3 +26,21 @@ def write_json_snapshot(
     snapshot_text = json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True)
     snapshot_path.write_text(f"{snapshot_text}\n", encoding="utf-8")
     return snapshot_path
+
+
+def move_file_snapshot(
+    *,
+    source_path: Path,
+    root_dir: Path,
+    dataset: str,
+    extracted_at: datetime,
+    filename: str,
+) -> Path:
+    timestamp = format_extracted_at(extracted_at)
+    snapshot_path = root_dir / "melbourne" / dataset / f"extracted_at={timestamp}" / filename
+    if snapshot_path.exists():
+        raise FileExistsError(snapshot_path)
+
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.replace(snapshot_path)
+    return snapshot_path

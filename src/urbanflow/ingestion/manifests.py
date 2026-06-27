@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from urbanflow.ingestion.snapshots import format_extracted_at
 
@@ -17,6 +18,7 @@ def write_manifest(
     record_count: int,
     source_total_count: int,
     snapshot_path: Path,
+    metadata: dict[str, Any] | None = None,
 ) -> Path:
     timestamp = format_extracted_at(extracted_at)
     manifest_path = root_dir / dataset / f"{timestamp}.json"
@@ -34,6 +36,8 @@ def write_manifest(
         "snapshot_path": snapshot_path.as_posix(),
         "snapshot_sha256": hashlib.sha256(snapshot_path.read_bytes()).hexdigest(),
     }
+    if metadata is not None:
+        manifest["metadata"] = metadata
     manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
     manifest_path.write_text(f"{manifest_text}\n", encoding="utf-8")
     return manifest_path
