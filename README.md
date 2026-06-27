@@ -55,6 +55,22 @@ There is no unbounded default because the source has million-row scale. By
 default the command writes an immutable CSV snapshot below `data/raw/` and a
 matching manifest below `data/manifests/`; both are ignored by Git.
 
+## Validate a local raw snapshot
+
+After generating raw snapshots, validate them before downstream processing:
+
+```powershell
+$sensorSnapshot = Get-ChildItem data/raw/melbourne/sensor_locations -Filter records.json -Recurse | Select-Object -First 1
+python scripts/validate_snapshot.py sensor_locations $sensorSnapshot.FullName
+
+$hourlySnapshot = Get-ChildItem data/raw/melbourne/hourly_counts -Filter records.csv -Recurse | Select-Object -First 1
+python scripts/validate_snapshot.py hourly_counts $hourlySnapshot.FullName
+```
+
+Use `--report-root reports/data_quality` to write the full JSON quality report.
+The command exits with `0` for pass, `1` for validation failures, and `2` for
+invalid input or unreadable snapshot files.
+
 ## Planned delivery slices
 
 1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is runnable locally; hourly-count ingestion has a bounded CSV export pipeline.

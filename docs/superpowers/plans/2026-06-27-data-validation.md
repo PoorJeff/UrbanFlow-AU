@@ -322,7 +322,7 @@ def test_read_hourly_counts_snapshot_loads_csv_as_strings(tmp_path):
     snapshot_path = tmp_path / "records.csv"
     snapshot_path.write_text(
         "id,location_id,sensing_date,hourday,direction_1,direction_2,pedestriancount,sensor_name,location\n"
-        "abc,1,2025-01-01,0,2,3,5,Sensor A,-37.81,144.96\n",
+        'abc,1,2025-01-01,0,2,3,5,Sensor A,"-37.81,144.96"\n',
         encoding="utf-8",
     )
 
@@ -558,12 +558,12 @@ Commit readers after Task 3 and Task 4 make the pipeline tests pass.
 ## Task 3: Sensor-Location Validation
 
 **Files:**
-- Create: `tests/unit/validation/test_sensor_locations.py`
+- Create: `tests/unit/validation/test_validation_sensor_locations.py`
 - Create: `src/urbanflow/validation/sensor_locations.py`
 
 - [ ] **Step 1: Write failing sensor-location tests**
 
-Create `tests/unit/validation/test_sensor_locations.py`:
+Create `tests/unit/validation/test_validation_sensor_locations.py`:
 
 ```python
 import json
@@ -639,7 +639,7 @@ def test_sensor_location_snapshot_fails_for_blank_name_and_bad_coordinates(tmp_p
 Run:
 
 ```powershell
-$env:PYTHONPATH='src'; & ..\..\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_sensor_locations.py -v
+$env:PYTHONPATH='src'; & ..\..\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_validation_sensor_locations.py -v
 ```
 
 Expected: collection fails because `urbanflow.validation.sensor_locations` does not exist.
@@ -772,7 +772,7 @@ def validate_sensor_locations_snapshot(
 Run:
 
 ```powershell
-$env:PYTHONPATH='src'; & ..\..\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_sensor_locations.py tests/unit/validation/test_pipeline.py::test_validate_snapshot_writes_report_when_report_root_is_provided -v
+$env:PYTHONPATH='src'; & ..\..\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_validation_sensor_locations.py tests/unit/validation/test_pipeline.py::test_validate_snapshot_writes_report_when_report_root_is_provided -v
 ```
 
 Expected: sensor tests pass and the sensor pipeline report-writing test passes.
@@ -780,12 +780,12 @@ Expected: sensor tests pass and the sensor pipeline report-writing test passes.
 ## Task 4: Hourly-Count Validation
 
 **Files:**
-- Create: `tests/unit/validation/test_hourly_counts.py`
+- Create: `tests/unit/validation/test_validation_hourly_counts.py`
 - Create: `src/urbanflow/validation/hourly_counts.py`
 
 - [ ] **Step 1: Write failing hourly-count tests**
 
-Create `tests/unit/validation/test_hourly_counts.py`:
+Create `tests/unit/validation/test_validation_hourly_counts.py`:
 
 ```python
 from datetime import UTC, datetime
@@ -806,9 +806,9 @@ def test_hourly_count_snapshot_passes_and_records_metrics(tmp_path):
     snapshot_path = _write_csv(
         tmp_path,
         [
-            "a,1,2025-01-01,0,2,3,5,Sensor A,-37.81,144.96\n",
-            "b,1,2025-01-01,1,1,1,2,Sensor A,-37.81,144.96\n",
-            "c,2,2025-01-02,23,4,6,10,Sensor B,-37.82,144.97\n",
+            'a,1,2025-01-01,0,2,3,5,Sensor A,"-37.81,144.96"\n',
+            'b,1,2025-01-01,1,1,1,2,Sensor A,"-37.81,144.96"\n',
+            'c,2,2025-01-02,23,4,6,10,Sensor B,"-37.82,144.97"\n',
         ],
     )
 
@@ -829,8 +829,8 @@ def test_hourly_count_snapshot_fails_for_duplicate_id(tmp_path):
     snapshot_path = _write_csv(
         tmp_path,
         [
-            "a,1,2025-01-01,0,2,3,5,Sensor A,-37.81,144.96\n",
-            "a,1,2025-01-01,1,1,1,2,Sensor A,-37.81,144.96\n",
+            'a,1,2025-01-01,0,2,3,5,Sensor A,"-37.81,144.96"\n',
+            'a,1,2025-01-01,1,1,1,2,Sensor A,"-37.81,144.96"\n',
         ],
     )
 
@@ -843,7 +843,7 @@ def test_hourly_count_snapshot_fails_for_duplicate_id(tmp_path):
 def test_hourly_count_snapshot_fails_for_hour_range_and_direction_total(tmp_path):
     snapshot_path = _write_csv(
         tmp_path,
-        ["a,1,2025-01-01,24,2,3,9,Sensor A,-37.81,144.96\n"],
+        ['a,1,2025-01-01,24,2,3,9,Sensor A,"-37.81,144.96"\n'],
     )
 
     report = validate_hourly_counts_snapshot(snapshot_path)
@@ -857,8 +857,8 @@ def test_hourly_count_snapshot_warns_for_duplicate_sensor_hour_and_incomplete_co
     snapshot_path = _write_csv(
         tmp_path,
         [
-            "a,1,2025-01-01,0,2,3,5,Sensor A,-37.81,144.96\n",
-            "b,1,2025-01-01,0,1,1,2,Sensor A,-37.81,144.96\n",
+            'a,1,2025-01-01,0,2,3,5,Sensor A,"-37.81,144.96"\n',
+            'b,1,2025-01-01,0,1,1,2,Sensor A,"-37.81,144.96"\n',
         ],
     )
 
@@ -874,7 +874,7 @@ def test_hourly_count_snapshot_warns_for_duplicate_sensor_hour_and_incomplete_co
 Run:
 
 ```powershell
-$env:PYTHONPATH='src'; & ..\..\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_hourly_counts.py -v
+$env:PYTHONPATH='src'; & ..\..\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_validation_hourly_counts.py -v
 ```
 
 Expected: collection fails because `urbanflow.validation.hourly_counts` does not exist.
@@ -1150,7 +1150,7 @@ def test_validation_cli_returns_one_for_validation_failure(tmp_path, capsys):
     snapshot_path = tmp_path / "records.csv"
     snapshot_path.write_text(
         "id,location_id,sensing_date,hourday,direction_1,direction_2,pedestriancount,sensor_name,location\n"
-        "a,1,2025-01-01,24,2,3,9,Sensor A,-37.81,144.96\n",
+        'a,1,2025-01-01,24,2,3,9,Sensor A,"-37.81,144.96"\n',
         encoding="utf-8",
     )
 
@@ -1171,10 +1171,11 @@ def test_validation_cli_returns_two_for_read_failure(tmp_path, capsys):
     assert payload["error_count"] == 1
 
 
-def test_validation_script_help(repository_root):
+def test_validation_script_help():
     import subprocess
     import sys
 
+    repository_root = Path(__file__).parents[3]
     result = subprocess.run(
         [sys.executable, repository_root / "scripts" / "validate_snapshot.py", "--help"],
         check=True,
@@ -1279,7 +1280,7 @@ Modify `pyproject.toml` dependencies:
 ```toml
 dependencies = [
     "httpx>=0.28,<1",
-    "pandas>=2.1,<3",
+    "pandas>=2.1,<4",
     "pandera[pandas]>=0.24,<1",
     "tenacity>=9,<10",
 ]

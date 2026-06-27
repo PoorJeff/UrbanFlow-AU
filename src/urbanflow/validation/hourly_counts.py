@@ -49,8 +49,7 @@ def _schema_errors(frame: pd.DataFrame) -> tuple[ValidationIssue, ...]:
             ValidationIssue(
                 code="SCHEMA_INVALID",
                 message=(
-                    "Hourly-count schema validation failed: "
-                    f"{len(exc.failure_cases)} failure cases"
+                    f"Hourly-count schema validation failed: {len(exc.failure_cases)} failure cases"
                 ),
             ),
         )

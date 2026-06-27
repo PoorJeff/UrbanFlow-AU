@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 
 from urbanflow.validation.hourly_counts import validate_hourly_counts_snapshot
 
-
 HEADER = (
     "id,location_id,sensing_date,hourday,direction_1,direction_2,"
     "pedestriancount,sensor_name,location\n"

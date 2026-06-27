@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 authors = [{ name = "UrbanFlow AU contributors" }]
 dependencies = [
     "httpx>=0.28,<1",
+    "pandas>=2.1,<4",
+    "pandera[pandas]>=0.24,<1",
     "tenacity>=9,<10",
 ]
 
