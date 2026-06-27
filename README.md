@@ -42,9 +42,22 @@ prints a JSON summary. By default it writes an immutable snapshot below
 by Git. Use `--raw-root`, `--manifest-root`, or `--page-limit` to override the
 defaults.
 
+## Run hourly-count ingestion locally
+
+```powershell
+python scripts/ingest_hourly_counts.py --year 2025
+```
+
+The command downloads a bounded City of Melbourne hourly-count CSV export and
+prints a JSON summary. Use `--year YYYY` for a full calendar year, or provide
+both `--start-date YYYY-MM-DD` and `--end-date YYYY-MM-DD` for a smaller range.
+There is no unbounded default because the source has million-row scale. By
+default the command writes an immutable CSV snapshot below `data/raw/` and a
+matching manifest below `data/manifests/`; both are ignored by Git.
+
 ## Planned delivery slices
 
-1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion now has a tested Python function entry point.
+1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is runnable locally; hourly-count ingestion has a bounded CSV export pipeline.
 2. Data validation, PostgreSQL persistence, and Prefect orchestration.
 3. Leakage-safe features, rolling-origin backtests, and MLflow tracking.
 4. FastAPI forecasts, Streamlit operations views, and Evidently monitoring.
