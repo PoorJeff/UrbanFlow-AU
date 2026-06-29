@@ -89,6 +89,20 @@ python scripts/load_snapshot_to_db.py hourly_counts $hourlySnapshot.FullName
 The database loader validates each snapshot before writing. Validation hard errors stop
 the load; validation warnings are reported but do not block insertion.
 
+### Run a local PostgreSQL smoke test
+
+The persistence stage also includes an explicit smoke test for a real local
+PostgreSQL database. It creates a temporary schema, writes one synthetic sensor
+row and one hourly-count row, verifies the row counts, then drops the schema.
+
+```powershell
+$env:URBANFLOW_SMOKE_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
+python scripts/smoke_test_postgres_persistence.py
+```
+
+This smoke test is manual by design, so routine unit tests do not require a
+running PostgreSQL service.
+
 ## Planned delivery slices
 
 1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is runnable locally; hourly-count ingestion has a bounded CSV export pipeline.
