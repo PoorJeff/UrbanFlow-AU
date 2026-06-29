@@ -71,6 +71,24 @@ Use `--report-root reports/data_quality` to write the full JSON quality report.
 The command exits with `0` for pass, `1` for validation failures, and `2` for
 invalid input or unreadable snapshot files.
 
+## Load validated snapshots into PostgreSQL
+
+Set a SQLAlchemy-compatible PostgreSQL URL, run migrations, then load validated snapshots:
+
+```powershell
+$env:URBANFLOW_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
+alembic upgrade head
+
+$sensorSnapshot = Get-ChildItem data/raw/melbourne/sensor_locations -Filter records.json -Recurse | Select-Object -First 1
+python scripts/load_snapshot_to_db.py sensor_locations $sensorSnapshot.FullName
+
+$hourlySnapshot = Get-ChildItem data/raw/melbourne/hourly_counts -Filter records.csv -Recurse | Select-Object -First 1
+python scripts/load_snapshot_to_db.py hourly_counts $hourlySnapshot.FullName
+```
+
+The database loader validates each snapshot before writing. Validation hard errors stop
+the load; validation warnings are reported but do not block insertion.
+
 ## Planned delivery slices
 
 1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is runnable locally; hourly-count ingestion has a bounded CSV export pipeline.
