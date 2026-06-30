@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "pandas>=2.1,<4",
     "pandera[pandas]>=0.24,<1",
+    "prefect>=3,<4",
     "psycopg[binary]>=3.2,<4",
     "SQLAlchemy>=2.0,<3",
     "tenacity>=9,<10",
