@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from urbanflow.database.loaders import DatabaseLoadResult
 from urbanflow.ingestion.hourly_count_pipeline import HourlyCountIngestionResult
 from urbanflow.ingestion.hourly_counts import HourlyCountDateRange
 from urbanflow.ingestion.sensor_location_pipeline import SensorLocationIngestionResult
@@ -191,3 +192,195 @@ def test_run_ingestion_flow_stops_on_validation_failure(monkeypatch, tmp_path):
             start_date=date(2025, 1, 1),
             end_date=date(2025, 1, 31),
         )
+
+
+def test_load_snapshots_to_database_loads_sensor_before_hourly(monkeypatch, tmp_path):
+    calls = []
+    sensor_snapshot_path = tmp_path / "sensor" / "records.json"
+    hourly_snapshot_path = tmp_path / "hourly" / "records.csv"
+
+    class FakeEngine:
+        def dispose(self):
+            calls.append(("dispose",))
+
+    class FakeSessionFactory:
+        def begin(self):
+            class Context:
+                def __enter__(self):
+                    calls.append(("begin",))
+                    return "session"
+
+                def __exit__(self, exc_type, exc, tb):
+                    calls.append(("end",))
+                    return False
+
+            return Context()
+
+    def fake_create_database_engine(database_url):
+        calls.append(("engine", database_url))
+        return FakeEngine()
+
+    def fake_create_session_factory(engine):
+        calls.append(("factory", type(engine).__name__))
+        return FakeSessionFactory()
+
+    def fake_load_sensor_locations_snapshot(session, snapshot_path):
+        calls.append(("sensor_load", session, snapshot_path))
+        return DatabaseLoadResult(
+            dataset="sensor_locations",
+            row_count=2,
+            validation_warning_count=0,
+        )
+
+    def fake_load_hourly_counts_snapshot(session, snapshot_path):
+        calls.append(("hourly_load", session, snapshot_path))
+        return DatabaseLoadResult(
+            dataset="hourly_counts",
+            row_count=3,
+            validation_warning_count=1,
+        )
+
+    monkeypatch.setattr(
+        ingestion_flow,
+        "create_database_engine",
+        fake_create_database_engine,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "create_session_factory",
+        fake_create_session_factory,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "load_sensor_locations_snapshot",
+        fake_load_sensor_locations_snapshot,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "load_hourly_counts_snapshot",
+        fake_load_hourly_counts_snapshot,
+    )
+
+    result = ingestion_flow.load_snapshots_to_database(
+        database_url="postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow",
+        sensor_snapshot_path=sensor_snapshot_path,
+        hourly_snapshot_path=hourly_snapshot_path,
+    )
+
+    assert result == (
+        ingestion_flow.DatabaseFlowResult(
+            dataset="sensor_locations",
+            row_count=2,
+            validation_warning_count=0,
+        ),
+        ingestion_flow.DatabaseFlowResult(
+            dataset="hourly_counts",
+            row_count=3,
+            validation_warning_count=1,
+        ),
+    )
+    assert calls == [
+        (
+            "engine",
+            "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow",
+        ),
+        ("factory", "FakeEngine"),
+        ("begin",),
+        ("sensor_load", "session", sensor_snapshot_path),
+        ("hourly_load", "session", hourly_snapshot_path),
+        ("end",),
+        ("dispose",),
+    ]
+
+
+def test_run_ingestion_flow_loads_database_after_validation(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_ingest_sensor_locations_task(**kwargs):
+        calls.append(("sensor_ingest",))
+        return sensor_result(tmp_path)
+
+    def fake_ingest_hourly_counts_task(**kwargs):
+        calls.append(("hourly_ingest",))
+        return hourly_result(tmp_path, kwargs["date_range"])
+
+    def fake_validate_snapshot_task(dataset, snapshot_path, *, report_root_dir):
+        calls.append(("validate", dataset))
+        return validation_report(dataset, snapshot_path)
+
+    def fake_load_snapshots_to_database_task(**kwargs):
+        calls.append(
+            (
+                "database_load",
+                kwargs["database_url"],
+                kwargs["sensor_snapshot_path"],
+                kwargs["hourly_snapshot_path"],
+            )
+        )
+        return (
+            ingestion_flow.DatabaseFlowResult(
+                dataset="sensor_locations",
+                row_count=2,
+                validation_warning_count=0,
+            ),
+            ingestion_flow.DatabaseFlowResult(
+                dataset="hourly_counts",
+                row_count=3,
+                validation_warning_count=0,
+            ),
+        )
+
+    monkeypatch.setattr(
+        ingestion_flow,
+        "ingest_sensor_locations_task",
+        fake_ingest_sensor_locations_task,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "ingest_hourly_counts_task",
+        fake_ingest_hourly_counts_task,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "validate_snapshot_task",
+        fake_validate_snapshot_task,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "load_snapshots_to_database_task",
+        fake_load_snapshots_to_database_task,
+    )
+
+    result = ingestion_flow.run_ingestion_flow.fn(
+        raw_root_dir=tmp_path / "raw",
+        manifest_root_dir=tmp_path / "manifests",
+        report_root_dir=tmp_path / "reports",
+        year=2025,
+        load_to_database=True,
+        database_url="postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow",
+    )
+
+    assert result.database_loads == (
+        ingestion_flow.DatabaseFlowResult(
+            dataset="sensor_locations",
+            row_count=2,
+            validation_warning_count=0,
+        ),
+        ingestion_flow.DatabaseFlowResult(
+            dataset="hourly_counts",
+            row_count=3,
+            validation_warning_count=0,
+        ),
+    )
+    assert calls == [
+        ("sensor_ingest",),
+        ("hourly_ingest",),
+        ("validate", "sensor_locations"),
+        ("validate", "hourly_counts"),
+        (
+            "database_load",
+            "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow",
+            tmp_path / "raw" / "sensor_locations" / "records.json",
+            tmp_path / "raw" / "hourly_counts" / "records.csv",
+        ),
+    ]
