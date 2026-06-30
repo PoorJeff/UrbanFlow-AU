@@ -55,6 +55,29 @@ There is no unbounded default because the source has million-row scale. By
 default the command writes an immutable CSV snapshot below `data/raw/` and a
 matching manifest below `data/manifests/`; both are ignored by Git.
 
+## Run the local Prefect ingestion flow
+
+```powershell
+python scripts/run_ingestion_flow.py --year 2025
+```
+
+The command runs the local Prefect flow for sensor-location ingestion, bounded
+hourly-count ingestion, and snapshot validation. It writes raw snapshots below
+`data/raw/`, manifests below `data/manifests/`, and validation reports below
+`reports/data_quality/`.
+
+To also load the generated snapshots into PostgreSQL, run migrations first and
+pass a database URL explicitly or through `URBANFLOW_DATABASE_URL`:
+
+```powershell
+$env:URBANFLOW_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
+alembic upgrade head
+python scripts/run_ingestion_flow.py --year 2025 --load-to-database
+```
+
+The flow is local by design. It does not require a Prefect server, deployment,
+work pool, or schedule.
+
 ## Validate a local raw snapshot
 
 After generating raw snapshots, validate them before downstream processing:
