@@ -78,6 +78,19 @@ python scripts/run_ingestion_flow.py --year 2025 --load-to-database
 The flow is local by design. It does not require a Prefect server, deployment,
 work pool, or schedule.
 
+## Build leakage-safe modeling features
+
+The first modeling foundation is intentionally local and deterministic. It
+builds supervised `forecast_horizon=1..24` rows from hourly pedestrian
+observations, adds calendar, lag, rolling, missing-marker, and optional weather
+columns, and evaluates a Seasonal Naive baseline through chronological split
+utilities.
+
+The implementation is DataFrame-first so it can be tested without PostgreSQL,
+network access, MLflow, Ridge, or LightGBM. Subsequent modeling slices will add
+database readers, Ridge, LightGBM, and MLflow tracking on top of the same
+feature and split contracts.
+
 ## Validate a local raw snapshot
 
 After generating raw snapshots, validate them before downstream processing:
