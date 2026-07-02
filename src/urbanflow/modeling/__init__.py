@@ -13,6 +13,13 @@ from urbanflow.modeling.metrics import (
     peak_top_decile_mae,
     summarize_by_group,
 )
+from urbanflow.modeling.ridge import (
+    DEFAULT_RIDGE_MODEL_CONFIG,
+    FittedRidgeModel,
+    RidgeModelConfig,
+    add_ridge_predictions,
+    fit_ridge_model,
+)
 from urbanflow.modeling.splits import (
     EvaluationWindow,
     RollingOriginSplits,
@@ -23,15 +30,20 @@ from urbanflow.modeling.splits import (
 
 __all__ = [
     "DEFAULT_RIDGE_FEATURE_SPEC",
+    "DEFAULT_RIDGE_MODEL_CONFIG",
     "EvaluationWindow",
+    "FittedRidgeModel",
     "ModelFeatureSpec",
     "ModelTrainingError",
     "RegressionMetrics",
+    "RidgeModelConfig",
     "RollingOriginSplits",
     "SplitConfigError",
+    "add_ridge_predictions",
     "add_seasonal_naive_predictions",
     "build_rolling_origin_splits",
     "calculate_regression_metrics",
+    "fit_ridge_model",
     "complete_months",
     "peak_top_decile_mae",
     "select_model_features",
