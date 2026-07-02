@@ -112,6 +112,16 @@ The command expects supervised feature rows, not raw City of Melbourne
 hourly-count data. It prints a JSON summary with rolling-origin validation and
 final-test metrics.
 
+To render the JSON summary into a Markdown report, run:
+
+```powershell
+python scripts/evaluate_ridge_baseline.py data/modeling/supervised_rows.csv --validation-months 3 > reports/modeling/ridge_evaluation.json
+python scripts/render_ridge_evaluation_report.py reports/modeling/ridge_evaluation.json --output reports/modeling/ridge_evaluation.md
+```
+
+The `reports/` directory is for local generated artifacts and is not required
+for unit tests.
+
 ## Validate a local raw snapshot
 
 After generating raw snapshots, validate them before downstream processing:
