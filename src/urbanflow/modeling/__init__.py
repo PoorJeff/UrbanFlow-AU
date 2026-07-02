@@ -1,4 +1,12 @@
 from urbanflow.modeling.baselines import add_seasonal_naive_predictions
+from urbanflow.modeling.feature_matrix import (
+    DEFAULT_RIDGE_FEATURE_SPEC,
+    ModelFeatureSpec,
+    ModelTrainingError,
+    select_model_features,
+    select_training_rows,
+    validate_model_feature_columns,
+)
 from urbanflow.modeling.metrics import (
     RegressionMetrics,
     calculate_regression_metrics,
@@ -14,7 +22,10 @@ from urbanflow.modeling.splits import (
 )
 
 __all__ = [
+    "DEFAULT_RIDGE_FEATURE_SPEC",
     "EvaluationWindow",
+    "ModelFeatureSpec",
+    "ModelTrainingError",
     "RegressionMetrics",
     "RollingOriginSplits",
     "SplitConfigError",
@@ -23,5 +34,8 @@ __all__ = [
     "calculate_regression_metrics",
     "complete_months",
     "peak_top_decile_mae",
+    "select_model_features",
+    "select_training_rows",
     "summarize_by_group",
+    "validate_model_feature_columns",
 ]
