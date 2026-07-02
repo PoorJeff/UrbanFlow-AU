@@ -102,6 +102,16 @@ This Ridge slice does not yet add LightGBM, MLflow tracking, database-backed
 training reads, or model artifact persistence. Those pieces build on the Ridge
 training and evaluation contract.
 
+To evaluate Ridge from an already-built supervised feature CSV, run:
+
+```powershell
+python scripts/evaluate_ridge_baseline.py data/modeling/supervised_rows.csv --validation-months 3
+```
+
+The command expects supervised feature rows, not raw City of Melbourne
+hourly-count data. It prints a JSON summary with rolling-origin validation and
+final-test metrics.
+
 ## Validate a local raw snapshot
 
 After generating raw snapshots, validate them before downstream processing:
