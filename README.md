@@ -86,10 +86,21 @@ observations, adds calendar, lag, rolling, missing-marker, and optional weather
 columns, and evaluates a Seasonal Naive baseline through chronological split
 utilities.
 
-The implementation is DataFrame-first so it can be tested without PostgreSQL,
-network access, MLflow, Ridge, or LightGBM. Subsequent modeling slices will add
-database readers, Ridge, LightGBM, and MLflow tracking on top of the same
+The initial feature implementation is DataFrame-first so it can be tested
+without PostgreSQL, network access, MLflow, or LightGBM. Later modeling slices
+can add database readers, LightGBM, and MLflow tracking on top of the same
 feature and split contracts.
+
+## Train a local Ridge baseline
+
+The first trainable model slice fits a leakage-safe Ridge Regression baseline on
+the supervised feature rows. It uses the same rolling-origin windows and metrics
+as the Seasonal Naive baseline, keeps predictions in DataFrames, and remains
+local and deterministic.
+
+This Ridge slice does not yet add LightGBM, MLflow tracking, database-backed
+training reads, or model artifact persistence. Those pieces build on the Ridge
+training and evaluation contract.
 
 ## Validate a local raw snapshot
 
