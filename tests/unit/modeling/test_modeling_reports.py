@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
+from urbanflow.modeling.report_cli import main as report_main
 from urbanflow.modeling.reports import RidgeReportError, render_ridge_evaluation_report
 
 
@@ -108,3 +113,66 @@ def test_render_ridge_evaluation_report_rejects_missing_required_field() -> None
         match="missing required summary field: final_test.overall.mae",
     ):
         render_ridge_evaluation_report(summary)
+
+
+def write_summary_json(tmp_path: Path) -> Path:
+    path = tmp_path / "ridge_evaluation.json"
+    path.write_text(json.dumps(ridge_summary()), encoding="utf-8")
+    return path
+
+
+def test_report_cli_writes_markdown_file(tmp_path, capsys) -> None:
+    summary_path = write_summary_json(tmp_path)
+    output_path = tmp_path / "reports" / "ridge_evaluation.md"
+
+    exit_code = report_main([str(summary_path), "--output", str(output_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload == {"output_path": str(output_path)}
+    assert "# Ridge Evaluation Report" in output_path.read_text(encoding="utf-8")
+
+
+def test_report_cli_returns_two_when_output_exists_without_force(tmp_path, capsys) -> None:
+    summary_path = write_summary_json(tmp_path)
+    output_path = tmp_path / "ridge_evaluation.md"
+    output_path.write_text("existing", encoding="utf-8")
+
+    exit_code = report_main([str(summary_path), "--output", str(output_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "output file already exists" in captured.err
+    assert output_path.read_text(encoding="utf-8") == "existing"
+
+
+def test_report_cli_force_overwrites_existing_output(tmp_path, capsys) -> None:
+    summary_path = write_summary_json(tmp_path)
+    output_path = tmp_path / "ridge_evaluation.md"
+    output_path.write_text("existing", encoding="utf-8")
+
+    exit_code = report_main([str(summary_path), "--output", str(output_path), "--force"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert "# Ridge Evaluation Report" in output_path.read_text(encoding="utf-8")
+
+
+def test_render_ridge_evaluation_report_script_help() -> None:
+    repository_root = Path(__file__).parents[3]
+    result = subprocess.run(
+        [
+            sys.executable,
+            repository_root / "scripts" / "render_ridge_evaluation_report.py",
+            "--help",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Render a Ridge evaluation Markdown report" in result.stdout
