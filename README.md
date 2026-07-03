@@ -122,6 +122,9 @@ python scripts/render_ridge_evaluation_report.py reports/modeling/ridge_evaluati
 The `reports/` directory is for local generated artifacts and is not required
 for unit tests.
 
+A checked-in synthetic example report is available at
+[`docs/examples/modeling/ridge_evaluation_report.md`](docs/examples/modeling/ridge_evaluation_report.md).
+
 ## Validate a local raw snapshot
 
 After generating raw snapshots, validate them before downstream processing:
