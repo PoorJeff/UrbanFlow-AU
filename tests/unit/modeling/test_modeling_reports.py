@@ -125,6 +125,19 @@ xychart-beta
     assert expected_wape_chart in markdown
 
 
+def test_render_ridge_evaluation_report_escapes_mermaid_window_labels() -> None:
+    summary = deepcopy(ridge_summary())
+    validation_windows = summary["validation_windows"]
+    assert isinstance(validation_windows, list)
+    validation_window = validation_windows[0]
+    assert isinstance(validation_window, dict)
+    validation_window["name"] = 'validation "quoted"\nwindow'
+
+    markdown = render_ridge_evaluation_report(summary)
+
+    assert 'x-axis ["validation \\"quoted\\" window", "final_test_2025-02"]' in markdown
+
+
 def test_render_ridge_evaluation_report_formats_missing_metrics_as_na() -> None:
     summary = deepcopy(ridge_summary())
     final_test = summary["final_test"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -132,7 +133,7 @@ def _numeric_metric_value(value: Any) -> float | None:
 
 def _mermaid_label(value: Any) -> str:
     text = str(value).replace("\n", " ")
-    return f'"{text}"'
+    return json.dumps(text, ensure_ascii=False)
 
 
 def _chart_axis_upper_bound(values: Sequence[float]) -> float:
