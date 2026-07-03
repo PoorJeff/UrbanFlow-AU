@@ -176,3 +176,15 @@ def test_render_ridge_evaluation_report_script_help() -> None:
     )
 
     assert "Render a Ridge evaluation Markdown report" in result.stdout
+
+
+def test_checked_in_ridge_example_report_matches_renderer() -> None:
+    repository_root = Path(__file__).parents[3]
+    summary_path = (
+        repository_root / "docs" / "examples" / "modeling" / "ridge_evaluation_summary.json"
+    )
+    report_path = repository_root / "docs" / "examples" / "modeling" / "ridge_evaluation_report.md"
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert render_ridge_evaluation_report(summary) == report_path.read_text(encoding="utf-8")
