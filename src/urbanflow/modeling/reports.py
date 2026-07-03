@@ -121,8 +121,11 @@ def _horizon_row(record: Mapping[str, Any]) -> str:
 def _numeric_metric_value(value: Any) -> float | None:
     if value is None:
         return None
-    metric = float(value)
-    if math.isnan(metric):
+    try:
+        metric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(metric) or math.isinf(metric):
         return None
     return metric
 

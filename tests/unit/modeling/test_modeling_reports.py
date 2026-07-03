@@ -138,6 +138,34 @@ def test_render_ridge_evaluation_report_formats_missing_metrics_as_na() -> None:
     assert "| WAPE | n/a |" in markdown
 
 
+def test_render_ridge_evaluation_report_omits_nonnumeric_metrics_from_mermaid_charts() -> None:
+    summary = deepcopy(ridge_summary())
+    validation_windows = summary["validation_windows"]
+    assert isinstance(validation_windows, list)
+    validation_window = validation_windows[0]
+    assert isinstance(validation_window, dict)
+    validation_overall = validation_window["overall"]
+    assert isinstance(validation_overall, dict)
+    validation_overall["mae"] = None
+
+    final_test = summary["final_test"]
+    assert isinstance(final_test, dict)
+    final_overall = final_test["overall"]
+    assert isinstance(final_overall, dict)
+    final_overall["mae"] = "unavailable"
+
+    markdown = render_ridge_evaluation_report(summary)
+
+    assert "| MAE | unavailable |" in markdown
+    assert (
+        "| validation_2025-01 | 2025-01-01T00:00:00+11:00 to "
+        "2025-02-01T00:00:00+11:00 | 744 | 744 | n/a | 1.7543 | 0.0812 |"
+    ) in markdown
+    assert 'title "MAE by evaluation window"' not in markdown
+    assert 'title "RMSE by evaluation window"' in markdown
+    assert 'title "WAPE by evaluation window"' in markdown
+
+
 def test_render_ridge_evaluation_report_rejects_missing_required_field() -> None:
     summary = deepcopy(ridge_summary())
     final_test = summary["final_test"]
