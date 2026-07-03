@@ -125,6 +125,10 @@ for unit tests.
 A checked-in synthetic example report is available at
 [`docs/examples/modeling/ridge_evaluation_report.md`](docs/examples/modeling/ridge_evaluation_report.md).
 
+The generated Markdown report includes exact metric tables plus Mermaid
+comparison charts for viewers that support Mermaid, such as GitHub. If a viewer
+does not render Mermaid charts, the tables remain the source of exact values.
+
 ## Validate a local raw snapshot
 
 After generating raw snapshots, validate them before downstream processing:

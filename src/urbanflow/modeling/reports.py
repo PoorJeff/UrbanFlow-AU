@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -7,6 +8,13 @@ from typing import Any
 
 class RidgeReportError(ValueError):
     """Raised when a Ridge evaluation summary cannot be rendered."""
+
+
+_METRIC_CHARTS = (
+    ("mae", "MAE"),
+    ("rmse", "RMSE"),
+    ("wape", "WAPE"),
+)
 
 
 def _field_path(parent: str, key: str) -> str:
@@ -111,6 +119,83 @@ def _horizon_row(record: Mapping[str, Any]) -> str:
     )
 
 
+def _numeric_metric_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        metric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(metric) or math.isinf(metric):
+        return None
+    return metric
+
+
+def _mermaid_label(value: Any) -> str:
+    text = str(value).replace("\n", " ")
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _chart_axis_upper_bound(values: Sequence[float]) -> float:
+    if max(values) == 0:
+        return 1.0
+    return max(values) * 1.1
+
+
+def _metric_chart_points(
+    validation_windows: Sequence[Mapping[str, Any]],
+    final_test: Mapping[str, Any],
+    metric_key: str,
+) -> list[tuple[str, float]]:
+    points: list[tuple[str, float]] = []
+    for window in [*validation_windows, final_test]:
+        overall = _metric_mapping(window, path=str(window["name"]))
+        metric = _numeric_metric_value(overall[metric_key])
+        if metric is None:
+            continue
+        points.append((str(window["name"]), metric))
+    return points
+
+
+def _mermaid_metric_chart(metric_label: str, points: Sequence[tuple[str, float]]) -> str:
+    labels = ", ".join(_mermaid_label(label) for label, _ in points)
+    values = ", ".join(f"{value:.4f}" for _, value in points)
+    upper_bound = _chart_axis_upper_bound([value for _, value in points])
+    return "\n".join(
+        [
+            "```mermaid",
+            "xychart-beta",
+            f'    title "{metric_label} by evaluation window"',
+            f"    x-axis [{labels}]",
+            f'    y-axis "{metric_label}" 0 --> {upper_bound:.4f}',
+            f"    bar [{values}]",
+            "```",
+        ]
+    )
+
+
+def _metric_comparison_chart_lines(
+    validation_windows: Sequence[Mapping[str, Any]],
+    final_test: Mapping[str, Any],
+) -> list[str]:
+    chart_blocks = []
+    for metric_key, metric_label in _METRIC_CHARTS:
+        points = _metric_chart_points(validation_windows, final_test, metric_key)
+        if not points:
+            continue
+        chart_blocks.append(_mermaid_metric_chart(metric_label, points))
+
+    if not chart_blocks:
+        return []
+
+    lines = ["", "## Metric comparison charts", ""]
+    for index, chart_block in enumerate(chart_blocks):
+        if index > 0:
+            lines.append("")
+        lines.extend(chart_block.splitlines())
+    return lines
+
+
 def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
     for field in (
         "input_path",
@@ -169,6 +254,7 @@ def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     lines.extend(_validation_row(window) for window in validation_window_mappings)
+    lines.extend(_metric_comparison_chart_lines(validation_window_mappings, final_test))
     lines.extend(
         [
             "",

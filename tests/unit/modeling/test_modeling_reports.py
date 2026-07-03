@@ -87,6 +87,55 @@ def test_render_ridge_evaluation_report_includes_core_sections() -> None:
     assert markdown.endswith("\n")
 
 
+def test_render_ridge_evaluation_report_includes_mermaid_metric_charts() -> None:
+    markdown = render_ridge_evaluation_report(ridge_summary())
+
+    assert markdown.index("## Validation windows") < markdown.index("## Metric comparison charts")
+    assert markdown.index("## Metric comparison charts") < markdown.index(
+        "## Final test by horizon"
+    )
+    assert markdown.count("```mermaid\nxychart-beta") == 3
+
+    expected_mae_chart = """```mermaid
+xychart-beta
+    title "MAE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "MAE" 0 --> 1.3580
+    bar [1.2346, 1.2000]
+```"""
+    expected_rmse_chart = """```mermaid
+xychart-beta
+    title "RMSE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "RMSE" 0 --> 1.9298
+    bar [1.7543, 1.7000]
+```"""
+    expected_wape_chart = """```mermaid
+xychart-beta
+    title "WAPE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "WAPE" 0 --> 0.0894
+    bar [0.0812, 0.0700]
+```"""
+
+    assert expected_mae_chart in markdown
+    assert expected_rmse_chart in markdown
+    assert expected_wape_chart in markdown
+
+
+def test_render_ridge_evaluation_report_escapes_mermaid_window_labels() -> None:
+    summary = deepcopy(ridge_summary())
+    validation_windows = summary["validation_windows"]
+    assert isinstance(validation_windows, list)
+    validation_window = validation_windows[0]
+    assert isinstance(validation_window, dict)
+    validation_window["name"] = 'validation "quoted"\nwindow'
+
+    markdown = render_ridge_evaluation_report(summary)
+
+    assert 'x-axis ["validation \\"quoted\\" window", "final_test_2025-02"]' in markdown
+
+
 def test_render_ridge_evaluation_report_formats_missing_metrics_as_na() -> None:
     summary = deepcopy(ridge_summary())
     final_test = summary["final_test"]
@@ -98,6 +147,34 @@ def test_render_ridge_evaluation_report_formats_missing_metrics_as_na() -> None:
     markdown = render_ridge_evaluation_report(summary)
 
     assert "| WAPE | n/a |" in markdown
+
+
+def test_render_ridge_evaluation_report_omits_nonnumeric_metrics_from_mermaid_charts() -> None:
+    summary = deepcopy(ridge_summary())
+    validation_windows = summary["validation_windows"]
+    assert isinstance(validation_windows, list)
+    validation_window = validation_windows[0]
+    assert isinstance(validation_window, dict)
+    validation_overall = validation_window["overall"]
+    assert isinstance(validation_overall, dict)
+    validation_overall["mae"] = None
+
+    final_test = summary["final_test"]
+    assert isinstance(final_test, dict)
+    final_overall = final_test["overall"]
+    assert isinstance(final_overall, dict)
+    final_overall["mae"] = "unavailable"
+
+    markdown = render_ridge_evaluation_report(summary)
+
+    assert "| MAE | unavailable |" in markdown
+    assert (
+        "| validation_2025-01 | 2025-01-01T00:00:00+11:00 to "
+        "2025-02-01T00:00:00+11:00 | 744 | 744 | n/a | 1.7543 | 0.0812 |"
+    ) in markdown
+    assert 'title "MAE by evaluation window"' not in markdown
+    assert 'title "RMSE by evaluation window"' in markdown
+    assert 'title "WAPE by evaluation window"' in markdown
 
 
 def test_render_ridge_evaluation_report_rejects_missing_required_field() -> None:
