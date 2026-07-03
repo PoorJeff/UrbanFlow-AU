@@ -90,9 +90,7 @@ def test_render_ridge_evaluation_report_includes_core_sections() -> None:
 def test_render_ridge_evaluation_report_includes_mermaid_metric_charts() -> None:
     markdown = render_ridge_evaluation_report(ridge_summary())
 
-    assert markdown.index("## Validation windows") < markdown.index(
-        "## Metric comparison charts"
-    )
+    assert markdown.index("## Validation windows") < markdown.index("## Metric comparison charts")
     assert markdown.index("## Metric comparison charts") < markdown.index(
         "## Final test by horizon"
     )
