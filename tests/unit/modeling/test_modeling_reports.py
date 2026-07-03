@@ -87,6 +87,44 @@ def test_render_ridge_evaluation_report_includes_core_sections() -> None:
     assert markdown.endswith("\n")
 
 
+def test_render_ridge_evaluation_report_includes_mermaid_metric_charts() -> None:
+    markdown = render_ridge_evaluation_report(ridge_summary())
+
+    assert markdown.index("## Validation windows") < markdown.index(
+        "## Metric comparison charts"
+    )
+    assert markdown.index("## Metric comparison charts") < markdown.index(
+        "## Final test by horizon"
+    )
+    assert markdown.count("```mermaid\nxychart-beta") == 3
+
+    expected_mae_chart = """```mermaid
+xychart-beta
+    title "MAE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "MAE" 0 --> 1.3580
+    bar [1.2346, 1.2000]
+```"""
+    expected_rmse_chart = """```mermaid
+xychart-beta
+    title "RMSE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "RMSE" 0 --> 1.9298
+    bar [1.7543, 1.7000]
+```"""
+    expected_wape_chart = """```mermaid
+xychart-beta
+    title "WAPE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "WAPE" 0 --> 0.0894
+    bar [0.0812, 0.0700]
+```"""
+
+    assert expected_mae_chart in markdown
+    assert expected_rmse_chart in markdown
+    assert expected_wape_chart in markdown
+
+
 def test_render_ridge_evaluation_report_formats_missing_metrics_as_na() -> None:
     summary = deepcopy(ridge_summary())
     final_test = summary["final_test"]

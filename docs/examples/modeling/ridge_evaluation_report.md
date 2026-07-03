@@ -24,6 +24,32 @@ Training rows: 1488
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | validation_2025-01 | 2025-01-01T00:00:00+11:00 to 2025-02-01T00:00:00+11:00 | 744 | 744 | 1.2345 | 1.7654 | 0.0812 |
 
+## Metric comparison charts
+
+```mermaid
+xychart-beta
+    title "MAE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "MAE" 0 --> 1.3579
+    bar [1.2345, 1.2000]
+```
+
+```mermaid
+xychart-beta
+    title "RMSE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "RMSE" 0 --> 1.9419
+    bar [1.7654, 1.7000]
+```
+
+```mermaid
+xychart-beta
+    title "WAPE by evaluation window"
+    x-axis ["validation_2025-01", "final_test_2025-02"]
+    y-axis "WAPE" 0 --> 0.0893
+    bar [0.0812, 0.0700]
+```
+
 ## Final test by horizon
 
 | Horizon | Rows | MAE | RMSE | WAPE |
