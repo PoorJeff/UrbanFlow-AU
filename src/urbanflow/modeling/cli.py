@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from urbanflow.modeling.baselines import SeasonalNaiveBaselineError
 from urbanflow.modeling.evaluation import (
     ModelWindowEvaluation,
     RollingOriginRidgeEvaluation,
@@ -100,6 +101,15 @@ def _metrics_summary(metrics: RegressionMetrics) -> dict[str, object]:
     }
 
 
+def _comparison_summary(window_evaluation: ModelWindowEvaluation) -> dict[str, object]:
+    comparison = window_evaluation.model_comparison
+    return {
+        "ridge_wape": comparison.ridge_wape,
+        "seasonal_naive_wape": comparison.seasonal_naive_wape,
+        "relative_wape_improvement": comparison.relative_wape_improvement,
+    }
+
+
 def _horizon_metric_records(frame: pd.DataFrame) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for record in frame.to_dict(orient="records"):
@@ -121,6 +131,11 @@ def _window_summary(evaluation: ModelWindowEvaluation) -> dict[str, object]:
         "training_row_count": evaluation.model.training_row_count,
         "overall": _metrics_summary(evaluation.overall_metrics),
         "horizon_metrics": _horizon_metric_records(evaluation.horizon_metrics),
+        "seasonal_naive_overall": _metrics_summary(evaluation.seasonal_naive_overall_metrics),
+        "seasonal_naive_horizon_metrics": _horizon_metric_records(
+            evaluation.seasonal_naive_horizon_metrics
+        ),
+        "model_comparison": _comparison_summary(evaluation),
     }
 
 
@@ -142,6 +157,11 @@ def evaluation_summary(
     }
 
 
+def _seasonal_naive_metric_row_count(evaluation: RollingOriginRidgeEvaluation) -> int:
+    windows = [*evaluation.validation_windows, evaluation.final_test]
+    return sum(window.seasonal_naive_overall_metrics.row_count for window in windows)
+
+
 def run_ridge_evaluation(
     supervised_csv: Path,
     *,
@@ -158,6 +178,10 @@ def run_ridge_evaluation(
         splits,
         model_config=RidgeModelConfig(alpha=alpha),
     )
+    if _seasonal_naive_metric_row_count(evaluation) == 0:
+        raise RidgeEvaluationCliError(
+            "Seasonal Naive baseline unavailable for all evaluation windows"
+        )
     return evaluation_summary(
         evaluation, input_path=supervised_csv, row_count=len(supervised_frame)
     )
@@ -177,7 +201,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             validation_months=validation_months,
             alpha=alpha,
         )
-    except (ModelTrainingError, RidgeEvaluationCliError, SplitConfigError) as exc:
+    except (
+        ModelTrainingError,
+        RidgeEvaluationCliError,
+        SeasonalNaiveBaselineError,
+        SplitConfigError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
