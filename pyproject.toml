@@ -12,6 +12,7 @@ authors = [{ name = "UrbanFlow AU contributors" }]
 dependencies = [
     "alembic>=1.13,<2",
     "httpx>=0.28,<1",
+    "lightgbm>=4.6,<5",
     "pandas>=2.1,<4",
     "pandera[pandas]>=0.24,<1",
     "prefect>=3,<4",
