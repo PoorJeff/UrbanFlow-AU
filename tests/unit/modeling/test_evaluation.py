@@ -13,40 +13,45 @@ from urbanflow.modeling.splits import EvaluationWindow, RollingOriginSplits
 
 
 def supervised_rows() -> pd.DataFrame:
-    timestamps = pd.date_range("2025-01-01 00:00", periods=8, freq="h", tz="Australia/Melbourne")
-    values = [80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0]
+    timestamps = pd.date_range(
+        "2024-12-25 00:00",
+        "2025-01-01 07:00",
+        freq="h",
+        tz="Australia/Melbourne",
+    )
+    values = [80.0 + float(index % 24) for index in range(len(timestamps))]
     return pd.DataFrame(
         {
-            "location_id": [101, 101, 101, 101, 102, 102, 102, 102],
+            "location_id": [101] * len(timestamps),
             "forecast_origin_at": timestamps - pd.Timedelta(hours=1),
-            "forecast_horizon": [1, 2, 1, 2, 1, 2, 1, 2],
+            "forecast_horizon": [1 if index % 2 == 0 else 2 for index in range(len(timestamps))],
             "target_observed_at": timestamps,
             "target": values,
-            "target_missing": [False] * 8,
+            "target_missing": [False] * len(timestamps),
             "pedestrian_count": [value - 5.0 for value in values],
-            "pedestrian_count_missing": [False] * 8,
+            "pedestrian_count_missing": [False] * len(timestamps),
             "lag_1": [value - 5.0 for value in values],
             "lag_24": [value - 10.0 for value in values],
             "lag_168": [value - 20.0 for value in values],
             "rolling_24_mean": [value - 7.0 for value in values],
-            "rolling_24_std": [3.0] * 8,
+            "rolling_24_std": [3.0] * len(timestamps),
             "rolling_168_mean": [value - 15.0 for value in values],
-            "rolling_168_std": [6.0] * 8,
-            "hour": list(range(8)),
-            "weekday": [2] * 8,
-            "month": [1] * 8,
-            "is_weekend": [False] * 8,
-            "is_public_holiday": [False] * 8,
-            "hour_sin": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-            "hour_cos": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
-            "weekday_sin": [0.4] * 8,
-            "weekday_cos": [0.5] * 8,
-            "temperature": [20.0, 20.5, 21.0, 21.5, 22.0, 22.5, 23.0, 23.5],
-            "temperature_missing": [False] * 8,
-            "rainfall": [0.0] * 8,
-            "rainfall_missing": [False] * 8,
-            "wind_speed": [12.0, 11.0, 13.0, 12.5, 14.0, 13.5, 15.0, 14.5],
-            "wind_speed_missing": [False] * 8,
+            "rolling_168_std": [6.0] * len(timestamps),
+            "hour": timestamps.hour,
+            "weekday": timestamps.weekday,
+            "month": timestamps.month,
+            "is_weekend": [timestamp.weekday() >= 5 for timestamp in timestamps],
+            "is_public_holiday": [False] * len(timestamps),
+            "hour_sin": [0.1] * len(timestamps),
+            "hour_cos": [0.9] * len(timestamps),
+            "weekday_sin": [0.4] * len(timestamps),
+            "weekday_cos": [0.5] * len(timestamps),
+            "temperature": [20.0] * len(timestamps),
+            "temperature_missing": [False] * len(timestamps),
+            "rainfall": [0.0] * len(timestamps),
+            "rainfall_missing": [False] * len(timestamps),
+            "wind_speed": [12.0] * len(timestamps),
+            "wind_speed_missing": [False] * len(timestamps),
         }
     )
 
@@ -64,7 +69,7 @@ def test_evaluate_model_window_filters_train_and_evaluation_rows() -> None:
     result = evaluate_model_window(supervised_rows(), evaluation_window())
 
     assert result.window.name == "validation_2025_01_01_04"
-    assert result.model.training_row_count == 4
+    assert result.model.training_row_count == 172
     assert len(result.predictions) == 4
     assert result.predictions["target_observed_at"].min() >= evaluation_window().start
     assert result.predictions["target_observed_at"].max() < evaluation_window().end
@@ -83,6 +88,23 @@ def test_evaluate_model_window_returns_per_horizon_metrics() -> None:
         "rmse",
         "wape",
     }
+
+
+def test_evaluate_model_window_returns_seasonal_naive_metrics() -> None:
+    result = evaluate_model_window(supervised_rows(), evaluation_window())
+
+    assert "seasonal_naive_prediction" in result.predictions.columns
+    assert result.seasonal_naive_overall_metrics.row_count == 4
+    assert set(result.seasonal_naive_horizon_metrics.columns) == {
+        "forecast_horizon",
+        "row_count",
+        "mae",
+        "rmse",
+        "wape",
+    }
+    assert set(result.seasonal_naive_horizon_metrics["forecast_horizon"]) == {1, 2}
+    assert result.model_comparison.ridge_wape == result.overall_metrics.wape
+    assert result.model_comparison.seasonal_naive_wape == result.seasonal_naive_overall_metrics.wape
 
 
 def test_evaluate_model_window_rejects_empty_evaluation_window() -> None:
@@ -114,3 +136,5 @@ def test_evaluate_rolling_origin_ridge_evaluates_validation_and_final_windows() 
     assert len(result.validation_windows) == 1
     assert result.final_test.window.name == "final_test_2025_01_01_06"
     assert len(result.final_test.predictions) == 2
+    assert result.validation_windows[0].seasonal_naive_overall_metrics.row_count > 0
+    assert result.final_test.seasonal_naive_overall_metrics.row_count > 0
