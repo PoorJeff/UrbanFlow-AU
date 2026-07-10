@@ -128,6 +128,8 @@ A checked-in synthetic example report is available at
 The generated Markdown report includes exact metric tables plus Mermaid
 comparison charts for viewers that support Mermaid, such as GitHub. If a viewer
 does not render Mermaid charts, the tables remain the source of exact values.
+The same report also includes a Ridge versus Seasonal Naive comparison table so
+the trainable baseline can be interpreted against a one-week-prior baseline.
 
 ## Validate a local raw snapshot
 

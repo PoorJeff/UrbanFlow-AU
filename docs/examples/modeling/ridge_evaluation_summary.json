@@ -17,12 +17,39 @@
         "wape": 0.08
       }
     ],
+    "model_comparison": {
+      "relative_wape_improvement": 0.2631578947368421,
+      "ridge_wape": 0.07,
+      "seasonal_naive_wape": 0.095
+    },
     "name": "final_test_2025-02",
     "overall": {
       "mae": 1.2,
       "rmse": 1.7,
       "row_count": 672,
       "wape": 0.07
+    },
+    "seasonal_naive_horizon_metrics": [
+      {
+        "forecast_horizon": 1,
+        "mae": 1.7,
+        "rmse": 2.2,
+        "row_count": 336,
+        "wape": 0.09
+      },
+      {
+        "forecast_horizon": 24,
+        "mae": 1.9,
+        "rmse": 2.5,
+        "row_count": 336,
+        "wape": 0.1
+      }
+    ],
+    "seasonal_naive_overall": {
+      "mae": 1.8,
+      "rmse": 2.35,
+      "row_count": 672,
+      "wape": 0.095
     },
     "start": "2025-02-01T00:00:00+11:00",
     "train_end": "2025-02-01T00:00:00+11:00",
@@ -43,12 +70,32 @@
           "wape": 0.0812
         }
       ],
+      "model_comparison": {
+        "relative_wape_improvement": 0.1268817204301075,
+        "ridge_wape": 0.0812,
+        "seasonal_naive_wape": 0.093
+      },
       "name": "validation_2025-01",
       "overall": {
         "mae": 1.2345,
         "rmse": 1.7654,
         "row_count": 744,
         "wape": 0.0812
+      },
+      "seasonal_naive_horizon_metrics": [
+        {
+          "forecast_horizon": 1,
+          "mae": 1.42,
+          "rmse": 1.98,
+          "row_count": 744,
+          "wape": 0.093
+        }
+      ],
+      "seasonal_naive_overall": {
+        "mae": 1.42,
+        "rmse": 1.98,
+        "row_count": 744,
+        "wape": 0.093
       },
       "start": "2025-01-01T00:00:00+11:00",
       "train_end": "2025-01-01T00:00:00+11:00",
