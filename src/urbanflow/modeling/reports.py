@@ -51,6 +51,13 @@ def _metric_text(value: Any) -> str:
     return f"{metric:.4f}"
 
 
+def _percent_text(value: Any) -> str:
+    metric = _numeric_metric_value(value)
+    if metric is None:
+        return "n/a"
+    return f"{metric * 100:.2f}%"
+
+
 def _count_text(value: Any) -> str:
     if isinstance(value, bool):
         return str(value)
@@ -107,6 +114,56 @@ def _validation_row(window: Mapping[str, Any]) -> str:
         f"{_metric_text(overall['rmse'])} | "
         f"{_metric_text(overall['wape'])} |"
     )
+
+
+def _has_model_comparison(window: Mapping[str, Any]) -> bool:
+    return "seasonal_naive_overall" in window and "model_comparison" in window
+
+
+def _model_comparison_row(window: Mapping[str, Any], *, model_name: str) -> str:
+    if model_name == "Ridge":
+        metrics = _metric_mapping(window, path=str(window["name"]))
+        comparison = _required_mapping(
+            window["model_comparison"],
+            path=f"{window['name']}.model_comparison",
+        )
+        improvement = _percent_text(comparison.get("relative_wape_improvement"))
+    else:
+        metrics = _required_mapping(
+            window["seasonal_naive_overall"],
+            path=f"{window['name']}.seasonal_naive_overall",
+        )
+        improvement = "n/a"
+    return (
+        f"| {_cell_text(window['name'])} | {model_name} | "
+        f"{_count_text(metrics['row_count'])} | "
+        f"{_metric_text(metrics['mae'])} | "
+        f"{_metric_text(metrics['rmse'])} | "
+        f"{_metric_text(metrics['wape'])} | "
+        f"{improvement} |"
+    )
+
+
+def _model_comparison_lines(
+    final_test: Mapping[str, Any],
+    validation_windows: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    windows = [final_test, *validation_windows]
+    comparable_windows = [window for window in windows if _has_model_comparison(window)]
+    if not comparable_windows:
+        return []
+
+    lines = [
+        "",
+        "## Model comparison",
+        "",
+        "| Window | Model | Rows | MAE | RMSE | WAPE | Relative WAPE improvement |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for window in comparable_windows:
+        lines.append(_model_comparison_row(window, model_name="Ridge"))
+        lines.append(_model_comparison_row(window, model_name="Seasonal Naive"))
+    return lines
 
 
 def _horizon_row(record: Mapping[str, Any]) -> str:
@@ -247,12 +304,17 @@ def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
         f"| MAE | {_metric_text(final_overall['mae'])} |",
         f"| RMSE | {_metric_text(final_overall['rmse'])} |",
         f"| WAPE | {_metric_text(final_overall['wape'])} |",
-        "",
-        "## Validation windows",
-        "",
-        "| Window | Period | Training rows | Rows | MAE | RMSE | WAPE |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
+    lines.extend(_model_comparison_lines(final_test, validation_window_mappings))
+    lines.extend(
+        [
+            "",
+            "## Validation windows",
+            "",
+            "| Window | Period | Training rows | Rows | MAE | RMSE | WAPE |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     lines.extend(_validation_row(window) for window in validation_window_mappings)
     lines.extend(_metric_comparison_chart_lines(validation_window_mappings, final_test))
     lines.extend(

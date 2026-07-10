@@ -39,6 +39,26 @@ def ridge_summary() -> dict[str, object]:
                         "wape": 0.08123,
                     }
                 ],
+                "seasonal_naive_overall": {
+                    "row_count": 744,
+                    "mae": 1.4,
+                    "rmse": 1.9,
+                    "wape": 0.09,
+                },
+                "seasonal_naive_horizon_metrics": [
+                    {
+                        "forecast_horizon": 1,
+                        "row_count": 744,
+                        "mae": 1.4,
+                        "rmse": 1.9,
+                        "wape": 0.09,
+                    }
+                ],
+                "model_comparison": {
+                    "ridge_wape": 0.08123,
+                    "seasonal_naive_wape": 0.09,
+                    "relative_wape_improvement": 0.09744444444444444,
+                },
             }
         ],
         "final_test": {
@@ -62,6 +82,26 @@ def ridge_summary() -> dict[str, object]:
                     "wape": 0.07,
                 }
             ],
+            "seasonal_naive_overall": {
+                "row_count": 672,
+                "mae": 1.8,
+                "rmse": 2.3,
+                "wape": 0.1,
+            },
+            "seasonal_naive_horizon_metrics": [
+                {
+                    "forecast_horizon": 1,
+                    "row_count": 672,
+                    "mae": 1.8,
+                    "rmse": 2.3,
+                    "wape": 0.1,
+                }
+            ],
+            "model_comparison": {
+                "ridge_wape": 0.07,
+                "seasonal_naive_wape": 0.1,
+                "relative_wape_improvement": 0.3,
+            },
         },
     }
 
@@ -85,6 +125,40 @@ def test_render_ridge_evaluation_report_includes_core_sections() -> None:
     assert "## Final test by horizon" in markdown
     assert "| 1 | 672 | 1.2000 | 1.7000 | 0.0700 |" in markdown
     assert markdown.endswith("\n")
+
+
+def test_render_ridge_evaluation_report_includes_model_comparison_when_available() -> None:
+    markdown = render_ridge_evaluation_report(ridge_summary())
+
+    assert markdown.index("## Final test") < markdown.index("## Model comparison")
+    assert markdown.index("## Model comparison") < markdown.index("## Validation windows")
+    assert "| Window | Model | Rows | MAE | RMSE | WAPE | Relative WAPE improvement |" in markdown
+    assert "| final_test_2025-02 | Ridge | 672 | 1.2000 | 1.7000 | 0.0700 | 30.00% |" in markdown
+    assert (
+        "| final_test_2025-02 | Seasonal Naive | 672 | 1.8000 | 2.3000 | 0.1000 | n/a |" in markdown
+    )
+    assert "| validation_2025-01 | Ridge | 744 | 1.2346 | 1.7543 | 0.0812 | 9.74% |" in markdown
+
+
+def test_render_ridge_evaluation_report_omits_model_comparison_for_older_summaries() -> None:
+    summary = deepcopy(ridge_summary())
+    final_test = summary["final_test"]
+    assert isinstance(final_test, dict)
+    final_test.pop("seasonal_naive_overall")
+    final_test.pop("seasonal_naive_horizon_metrics")
+    final_test.pop("model_comparison")
+    validation_windows = summary["validation_windows"]
+    assert isinstance(validation_windows, list)
+    validation_window = validation_windows[0]
+    assert isinstance(validation_window, dict)
+    validation_window.pop("seasonal_naive_overall")
+    validation_window.pop("seasonal_naive_horizon_metrics")
+    validation_window.pop("model_comparison")
+
+    markdown = render_ridge_evaluation_report(summary)
+
+    assert "## Model comparison" not in markdown
+    assert "## Validation windows" in markdown
 
 
 def test_render_ridge_evaluation_report_includes_mermaid_metric_charts() -> None:
