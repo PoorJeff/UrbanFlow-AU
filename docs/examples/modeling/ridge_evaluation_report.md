@@ -18,6 +18,15 @@ Training rows: 1488
 | RMSE | 1.7000 |
 | WAPE | 0.0700 |
 
+## Model comparison
+
+| Window | Model | Rows | MAE | RMSE | WAPE | Relative WAPE improvement |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| final_test_2025-02 | Ridge | 672 | 1.2000 | 1.7000 | 0.0700 | 26.32% |
+| final_test_2025-02 | Seasonal Naive | 672 | 1.8000 | 2.3500 | 0.0950 | n/a |
+| validation_2025-01 | Ridge | 744 | 1.2345 | 1.7654 | 0.0812 | 12.69% |
+| validation_2025-01 | Seasonal Naive | 744 | 1.4200 | 1.9800 | 0.0930 | n/a |
+
 ## Validation windows
 
 | Window | Period | Training rows | Rows | MAE | RMSE | WAPE |
