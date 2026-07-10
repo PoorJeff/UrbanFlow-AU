@@ -5,6 +5,7 @@ import math
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -19,7 +20,8 @@ def supervised_rows() -> pd.DataFrame:
         tz="Australia/Melbourne",
     )
     values = [
-        100.0 + float(index % 24) + float((index // 24) % 7) for index in range(len(timestamps))
+        100.0 + float(index % 24) + float((index // 24) % 7) + float(index // (24 * 7))
+        for index in range(len(timestamps))
     ]
     return pd.DataFrame(
         {
@@ -95,6 +97,18 @@ def test_ridge_evaluation_cli_returns_json_summary(tmp_path, capsys) -> None:
     assert_finite_metric(payload["final_test"]["overall"]["mae"])
     assert_finite_metric(payload["final_test"]["overall"]["rmse"])
     assert_finite_metric(payload["final_test"]["overall"]["wape"])
+    final_test = payload["final_test"]
+    assert final_test["seasonal_naive_overall"]["row_count"] == 672
+    assert final_test["seasonal_naive_horizon_metrics"][0]["row_count"] == 672
+    assert_finite_metric(final_test["seasonal_naive_overall"]["mae"])
+    assert_finite_metric(final_test["seasonal_naive_overall"]["rmse"])
+    assert_finite_metric(final_test["seasonal_naive_overall"]["wape"])
+    assert final_test["model_comparison"]["ridge_wape"] == final_test["overall"]["wape"]
+    assert (
+        final_test["model_comparison"]["seasonal_naive_wape"]
+        == final_test["seasonal_naive_overall"]["wape"]
+    )
+    assert_finite_metric(final_test["model_comparison"]["relative_wape_improvement"])
 
 
 def test_ridge_evaluation_cli_returns_two_for_missing_input(tmp_path, capsys) -> None:
@@ -115,6 +129,74 @@ def test_ridge_evaluation_cli_returns_two_for_invalid_options(tmp_path, capsys) 
     assert exit_code == 2
     assert captured.out == ""
     assert "validation-months must be greater than zero" in captured.err
+
+
+def test_ridge_evaluation_cli_returns_two_for_conflicting_seasonal_naive_panel(
+    tmp_path,
+    capsys,
+) -> None:
+    frame = supervised_rows()
+    duplicate = frame.iloc[[0]].copy()
+    duplicate["target"] = duplicate["target"] + 1.0
+    frame = pd.concat([frame, duplicate], ignore_index=True)
+    path = tmp_path / "conflicting_supervised_rows.csv"
+    frame.to_csv(path, index=False)
+
+    exit_code = main([str(path), "--validation-months", "1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert (
+        "conflicting target values for duplicate location_id and target_observed_at" in captured.err
+    )
+
+
+def test_ridge_evaluation_cli_returns_two_when_seasonal_naive_is_unavailable(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    path = write_supervised_csv(tmp_path)
+    window = SimpleNamespace(
+        name="validation_2025-01",
+        start=pd.Timestamp("2025-01-01", tz="Australia/Melbourne"),
+        end=pd.Timestamp("2025-02-01", tz="Australia/Melbourne"),
+        train_end=pd.Timestamp("2025-01-01", tz="Australia/Melbourne"),
+    )
+    ridge_metrics = SimpleNamespace(row_count=1, mae=1.0, rmse=1.0, wape=0.1)
+    seasonal_naive_metrics = SimpleNamespace(row_count=0, mae=None, rmse=None, wape=None)
+    fake_window = SimpleNamespace(
+        window=window,
+        predictions=pd.DataFrame(),
+        overall_metrics=ridge_metrics,
+        horizon_metrics=pd.DataFrame(
+            [{"forecast_horizon": 1, "row_count": 1, "mae": 1.0, "rmse": 1.0, "wape": 0.1}]
+        ),
+        model=SimpleNamespace(training_row_count=1),
+        seasonal_naive_overall_metrics=seasonal_naive_metrics,
+        seasonal_naive_horizon_metrics=pd.DataFrame(
+            [{"forecast_horizon": 1, "row_count": 0, "mae": None, "rmse": None, "wape": None}]
+        ),
+        model_comparison=SimpleNamespace(
+            ridge_wape=0.1,
+            seasonal_naive_wape=None,
+            relative_wape_improvement=None,
+        ),
+    )
+    fake_evaluation = SimpleNamespace(validation_windows=(fake_window,), final_test=fake_window)
+
+    monkeypatch.setattr(
+        "urbanflow.modeling.cli.evaluate_rolling_origin_ridge",
+        lambda *args, **kwargs: fake_evaluation,
+    )
+
+    exit_code = main([str(path), "--validation-months", "1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "Seasonal Naive baseline unavailable for all evaluation windows" in captured.err
 
 
 def test_evaluate_ridge_baseline_script_help() -> None:
