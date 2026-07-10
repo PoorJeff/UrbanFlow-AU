@@ -13,6 +13,13 @@ from urbanflow.modeling.feature_matrix import (
     select_training_rows,
     validate_model_feature_columns,
 )
+from urbanflow.modeling.lightgbm import (
+    DEFAULT_LIGHTGBM_MODEL_CONFIG,
+    FittedLightGBMModel,
+    LightGBMModelConfig,
+    add_lightgbm_predictions,
+    fit_lightgbm_model,
+)
 from urbanflow.modeling.metrics import (
     RegressionMetrics,
     calculate_regression_metrics,
@@ -35,10 +42,13 @@ from urbanflow.modeling.splits import (
 )
 
 __all__ = [
+    "DEFAULT_LIGHTGBM_MODEL_CONFIG",
     "DEFAULT_RIDGE_FEATURE_SPEC",
     "DEFAULT_RIDGE_MODEL_CONFIG",
     "EvaluationWindow",
+    "FittedLightGBMModel",
     "FittedRidgeModel",
+    "LightGBMModelConfig",
     "ModelFeatureSpec",
     "ModelTrainingError",
     "ModelWindowEvaluation",
@@ -47,12 +57,14 @@ __all__ = [
     "RollingOriginSplits",
     "RollingOriginRidgeEvaluation",
     "SplitConfigError",
+    "add_lightgbm_predictions",
     "add_ridge_predictions",
     "add_seasonal_naive_predictions",
     "build_rolling_origin_splits",
     "calculate_regression_metrics",
     "evaluate_model_window",
     "evaluate_rolling_origin_ridge",
+    "fit_lightgbm_model",
     "fit_ridge_model",
     "complete_months",
     "peak_top_decile_mae",
