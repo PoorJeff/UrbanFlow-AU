@@ -35,6 +35,16 @@ def lightgbm_summary_path() -> Path:
     )
 
 
+def lightgbm_report_path() -> Path:
+    return (
+        Path(__file__).parents[3]
+        / "docs"
+        / "examples"
+        / "modeling"
+        / "lightgbm_evaluation_report.md"
+    )
+
+
 def ridge_summary_path() -> Path:
     return (
         Path(__file__).parents[3]
@@ -363,3 +373,41 @@ def test_track_evaluation_summary_converts_mlflow_errors() -> None:
             ridge_summary_path(),
             adapter=FailingMLflowTrackingAdapter(),
         )
+
+
+def test_track_evaluation_summary_writes_file_backed_mlflow_run(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import mlflow
+
+    working_dir = tmp_path / "working-directory"
+    working_dir.mkdir()
+    monkeypatch.chdir(working_dir)
+    monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
+    tracking_root = tmp_path / "mlflow-store"
+    tracking_root.mkdir()
+    tracking_uri = tracking_root.as_uri()
+    original_tracking_uri = mlflow.get_tracking_uri()
+
+    try:
+        result = track_evaluation_summary(
+            "lightgbm",
+            lightgbm_summary_path(),
+            report_path=lightgbm_report_path(),
+            config=MLflowTrackingConfig(
+                experiment_name="urbanflow-smoke-test",
+                tracking_uri=tracking_uri,
+            ),
+        )
+    finally:
+        mlflow.set_tracking_uri(original_tracking_uri)
+
+    assert result.run_id
+    assert result.experiment_id
+    assert result.tracking_uri == tracking_uri
+    assert mlflow.active_run() is None
+    logged_file_names = {path.name for path in tracking_root.rglob("*") if path.is_file()}
+    assert "lightgbm_evaluation_summary.json" in logged_file_names
+    assert "lightgbm_evaluation_report.md" in logged_file_names
+    assert not (working_dir / "mlruns").exists()
