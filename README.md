@@ -2,7 +2,9 @@
 
 UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand at selected City of Melbourne sensor locations. It will connect reproducible public-data ingestion, leakage-safe time-series evaluation, model serving, an operations dashboard, and MLOps monitoring.
 
-> **Project status:** foundation stage. The data pipeline and measured model results have not been implemented yet; no performance claims are made.
+> **Project status:** foundation and local-baseline stage. Local ingestion,
+> persistence, feature-building, and baseline evaluation slices are in place,
+> but no production forecasting performance claims are made.
 
 ## Requirements
 
@@ -86,10 +88,11 @@ observations, adds calendar, lag, rolling, missing-marker, and optional weather
 columns, and evaluates a Seasonal Naive baseline through chronological split
 utilities.
 
-The initial feature implementation is DataFrame-first so it can be tested
-without PostgreSQL, network access, MLflow, or LightGBM. Later modeling slices
-can add database readers, LightGBM, and MLflow tracking on top of the same
-feature and split contracts.
+The feature implementation is DataFrame-first so it can be tested without
+PostgreSQL, network access, MLflow, or model artifact persistence. The local
+Ridge and LightGBM baselines build on the same feature and split contracts;
+future slices can add database-backed training reads and MLflow tracking on top
+of this path.
 
 ## Train a local Ridge baseline
 
@@ -98,9 +101,9 @@ the supervised feature rows. It uses the same rolling-origin windows and metrics
 as the Seasonal Naive baseline, keeps predictions in DataFrames, and remains
 local and deterministic.
 
-This Ridge slice does not yet add LightGBM, MLflow tracking, database-backed
-training reads, or model artifact persistence. Those pieces build on the Ridge
-training and evaluation contract.
+This Ridge slice does not add MLflow tracking, database-backed training reads,
+or model artifact persistence. Those pieces build on the current local training
+and evaluation contract.
 
 To evaluate Ridge from an already-built supervised feature CSV, run:
 
@@ -130,6 +133,38 @@ comparison charts for viewers that support Mermaid, such as GitHub. If a viewer
 does not render Mermaid charts, the tables remain the source of exact values.
 The same report also includes a Ridge versus Seasonal Naive comparison table so
 the trainable baseline can be interpreted against a one-week-prior baseline.
+
+## Train a local LightGBM baseline
+
+The LightGBM baseline is the first non-linear trainable model in the project.
+It consumes the same supervised feature CSV as Ridge, uses the same
+rolling-origin validation and final-test windows, and reports LightGBM metrics
+beside Seasonal Naive comparison metrics.
+
+To evaluate LightGBM from an already-built supervised feature CSV, run:
+
+```powershell
+python scripts/evaluate_lightgbm_baseline.py data/modeling/supervised_rows.csv --validation-months 3
+```
+
+The command prints a JSON summary. The scores are local evaluation results from
+the supplied supervised CSV; they are not production performance claims and do
+not imply deployed model behavior.
+
+To render the JSON summary into a Markdown report, run:
+
+```powershell
+python scripts/evaluate_lightgbm_baseline.py data/modeling/supervised_rows.csv --validation-months 3 > reports/modeling/lightgbm_evaluation.json
+python scripts/render_lightgbm_evaluation_report.py reports/modeling/lightgbm_evaluation.json --output reports/modeling/lightgbm_evaluation.md
+```
+
+A checked-in synthetic example report is available at
+[`docs/examples/modeling/lightgbm_evaluation_report.md`](docs/examples/modeling/lightgbm_evaluation_report.md).
+
+The generated LightGBM report includes exact metric tables, Mermaid metric
+charts, and a LightGBM versus Seasonal Naive comparison table. MLflow tracking,
+model artifact persistence, feature-importance plots, and production serving
+remain out of scope for this local baseline slice.
 
 ## Validate a local raw snapshot
 
