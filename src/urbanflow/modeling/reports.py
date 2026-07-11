@@ -120,20 +120,22 @@ def _has_model_comparison(window: Mapping[str, Any]) -> bool:
     return "seasonal_naive_overall" in window and "model_comparison" in window
 
 
-def _model_comparison_row(window: Mapping[str, Any], *, model_name: str) -> str:
-    if model_name == "Ridge":
-        metrics = _metric_mapping(window, path=str(window["name"]))
-        comparison = _required_mapping(
-            window["model_comparison"],
-            path=f"{window['name']}.model_comparison",
-        )
-        improvement = _percent_text(comparison.get("relative_wape_improvement"))
-    else:
-        metrics = _required_mapping(
-            window["seasonal_naive_overall"],
-            path=f"{window['name']}.seasonal_naive_overall",
-        )
-        improvement = "n/a"
+def _primary_model_comparison_row(
+    window: Mapping[str, Any],
+    *,
+    model_name: str,
+    comparison_wape_key: str,
+) -> str:
+    metrics = _metric_mapping(window, path=str(window["name"]))
+    comparison_path = f"{window['name']}.model_comparison"
+    comparison = _required_mapping(
+        window["model_comparison"],
+        path=comparison_path,
+    )
+    _required(comparison, comparison_wape_key, path=comparison_path)
+    improvement = _percent_text(
+        _required(comparison, "relative_wape_improvement", path=comparison_path)
+    )
     return (
         f"| {_cell_text(window['name'])} | {model_name} | "
         f"{_count_text(metrics['row_count'])} | "
@@ -144,9 +146,27 @@ def _model_comparison_row(window: Mapping[str, Any], *, model_name: str) -> str:
     )
 
 
+def _seasonal_naive_comparison_row(window: Mapping[str, Any]) -> str:
+    metrics = _required_mapping(
+        window["seasonal_naive_overall"],
+        path=f"{window['name']}.seasonal_naive_overall",
+    )
+    return (
+        f"| {_cell_text(window['name'])} | Seasonal Naive | "
+        f"{_count_text(metrics['row_count'])} | "
+        f"{_metric_text(metrics['mae'])} | "
+        f"{_metric_text(metrics['rmse'])} | "
+        f"{_metric_text(metrics['wape'])} | "
+        "n/a |"
+    )
+
+
 def _model_comparison_lines(
     final_test: Mapping[str, Any],
     validation_windows: Sequence[Mapping[str, Any]],
+    *,
+    model_name: str,
+    comparison_wape_key: str,
 ) -> list[str]:
     windows = [final_test, *validation_windows]
     comparable_windows = [window for window in windows if _has_model_comparison(window)]
@@ -161,8 +181,14 @@ def _model_comparison_lines(
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for window in comparable_windows:
-        lines.append(_model_comparison_row(window, model_name="Ridge"))
-        lines.append(_model_comparison_row(window, model_name="Seasonal Naive"))
+        lines.append(
+            _primary_model_comparison_row(
+                window,
+                model_name=model_name,
+                comparison_wape_key=comparison_wape_key,
+            )
+        )
+        lines.append(_seasonal_naive_comparison_row(window))
     return lines
 
 
@@ -253,7 +279,13 @@ def _metric_comparison_chart_lines(
     return lines
 
 
-def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
+def _render_evaluation_report(
+    summary: Mapping[str, Any],
+    *,
+    report_title: str,
+    model_name: str,
+    comparison_wape_key: str,
+) -> str:
     for field in (
         "input_path",
         "row_count",
@@ -285,7 +317,7 @@ def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
     ]
 
     lines = [
-        "# Ridge Evaluation Report",
+        f"# {report_title}",
         "",
         f"Source: `{_cell_text(summary['input_path'])}`",
         "",
@@ -305,7 +337,14 @@ def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
         f"| RMSE | {_metric_text(final_overall['rmse'])} |",
         f"| WAPE | {_metric_text(final_overall['wape'])} |",
     ]
-    lines.extend(_model_comparison_lines(final_test, validation_window_mappings))
+    lines.extend(
+        _model_comparison_lines(
+            final_test,
+            validation_window_mappings,
+            model_name=model_name,
+            comparison_wape_key=comparison_wape_key,
+        )
+    )
     lines.extend(
         [
             "",
@@ -328,3 +367,21 @@ def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
     )
     lines.extend(_horizon_row(record) for record in final_horizons)
     return "\n".join(lines) + "\n"
+
+
+def render_ridge_evaluation_report(summary: Mapping[str, Any]) -> str:
+    return _render_evaluation_report(
+        summary,
+        report_title="Ridge Evaluation Report",
+        model_name="Ridge",
+        comparison_wape_key="ridge_wape",
+    )
+
+
+def render_lightgbm_evaluation_report(summary: Mapping[str, Any]) -> str:
+    return _render_evaluation_report(
+        summary,
+        report_title="LightGBM Evaluation Report",
+        model_name="LightGBM",
+        comparison_wape_key="lightgbm_wape",
+    )

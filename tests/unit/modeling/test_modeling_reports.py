@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 
 from urbanflow.modeling.report_cli import main as report_main
-from urbanflow.modeling.reports import RidgeReportError, render_ridge_evaluation_report
+from urbanflow.modeling.reports import (
+    RidgeReportError,
+    render_lightgbm_evaluation_report,
+    render_ridge_evaluation_report,
+)
 
 
 def ridge_summary() -> dict[str, object]:
@@ -106,6 +110,100 @@ def ridge_summary() -> dict[str, object]:
     }
 
 
+def lightgbm_summary() -> dict[str, object]:
+    return {
+        "input_path": "data/modeling/supervised_rows.csv",
+        "row_count": 1464,
+        "validation_window_count": 1,
+        "validation_windows": [
+            {
+                "name": "validation_2025-01",
+                "start": "2025-01-01T00:00:00+11:00",
+                "end": "2025-02-01T00:00:00+11:00",
+                "train_end": "2025-01-01T00:00:00+11:00",
+                "training_row_count": 744,
+                "overall": {
+                    "row_count": 744,
+                    "mae": 1.0,
+                    "rmse": 1.5,
+                    "wape": 0.065,
+                },
+                "horizon_metrics": [
+                    {
+                        "forecast_horizon": 1,
+                        "row_count": 744,
+                        "mae": 1.0,
+                        "rmse": 1.5,
+                        "wape": 0.065,
+                    }
+                ],
+                "seasonal_naive_overall": {
+                    "row_count": 744,
+                    "mae": 1.4,
+                    "rmse": 1.9,
+                    "wape": 0.09,
+                },
+                "seasonal_naive_horizon_metrics": [
+                    {
+                        "forecast_horizon": 1,
+                        "row_count": 744,
+                        "mae": 1.4,
+                        "rmse": 1.9,
+                        "wape": 0.09,
+                    }
+                ],
+                "model_comparison": {
+                    "lightgbm_wape": 0.065,
+                    "seasonal_naive_wape": 0.09,
+                    "relative_wape_improvement": 0.2777777777777778,
+                },
+            }
+        ],
+        "final_test": {
+            "name": "final_test_2025-02",
+            "start": "2025-02-01T00:00:00+11:00",
+            "end": "2025-03-01T00:00:00+11:00",
+            "train_end": "2025-02-01T00:00:00+11:00",
+            "training_row_count": 1488,
+            "overall": {
+                "row_count": 672,
+                "mae": 0.95,
+                "rmse": 1.45,
+                "wape": 0.055,
+            },
+            "horizon_metrics": [
+                {
+                    "forecast_horizon": 1,
+                    "row_count": 672,
+                    "mae": 0.95,
+                    "rmse": 1.45,
+                    "wape": 0.055,
+                }
+            ],
+            "seasonal_naive_overall": {
+                "row_count": 672,
+                "mae": 1.8,
+                "rmse": 2.3,
+                "wape": 0.1,
+            },
+            "seasonal_naive_horizon_metrics": [
+                {
+                    "forecast_horizon": 1,
+                    "row_count": 672,
+                    "mae": 1.8,
+                    "rmse": 2.3,
+                    "wape": 0.1,
+                }
+            ],
+            "model_comparison": {
+                "lightgbm_wape": 0.055,
+                "seasonal_naive_wape": 0.1,
+                "relative_wape_improvement": 0.45,
+            },
+        },
+    }
+
+
 def test_render_ridge_evaluation_report_includes_core_sections() -> None:
     markdown = render_ridge_evaluation_report(ridge_summary())
 
@@ -125,6 +223,37 @@ def test_render_ridge_evaluation_report_includes_core_sections() -> None:
     assert "## Final test by horizon" in markdown
     assert "| 1 | 672 | 1.2000 | 1.7000 | 0.0700 |" in markdown
     assert markdown.endswith("\n")
+
+
+def test_render_lightgbm_evaluation_report_includes_core_sections() -> None:
+    markdown = render_lightgbm_evaluation_report(lightgbm_summary())
+
+    assert markdown.startswith("# LightGBM Evaluation Report\n")
+    assert "Source: `data/modeling/supervised_rows.csv`" in markdown
+    assert "Rows evaluated: 1464" in markdown
+    assert "Validation windows: 1" in markdown
+    assert "## Final test" in markdown
+    assert "Window: `final_test_2025-02`" in markdown
+    assert "| Row count | 672 |" in markdown
+    assert "| MAE | 0.9500 |" in markdown
+    assert "## Validation windows" in markdown
+    assert "## Metric comparison charts" in markdown
+    assert "## Final test by horizon" in markdown
+    assert "| 1 | 672 | 0.9500 | 1.4500 | 0.0550 |" in markdown
+    assert markdown.endswith("\n")
+
+
+def test_render_lightgbm_evaluation_report_includes_model_comparison() -> None:
+    markdown = render_lightgbm_evaluation_report(lightgbm_summary())
+
+    assert markdown.index("## Final test") < markdown.index("## Model comparison")
+    assert markdown.index("## Model comparison") < markdown.index("## Validation windows")
+    assert "| Window | Model | Rows | MAE | RMSE | WAPE | Relative WAPE improvement |" in markdown
+    assert "| final_test_2025-02 | LightGBM | 672 | 0.9500 | 1.4500 | 0.0550 | 45.00% |" in markdown
+    assert (
+        "| final_test_2025-02 | Seasonal Naive | 672 | 1.8000 | 2.3000 | 0.1000 | n/a |" in markdown
+    )
+    assert "| validation_2025-01 | LightGBM | 744 | 1.0000 | 1.5000 | 0.0650 | 27.78% |" in markdown
 
 
 def test_render_ridge_evaluation_report_includes_model_comparison_when_available() -> None:
@@ -272,6 +401,12 @@ def write_summary_json(tmp_path: Path) -> Path:
     return path
 
 
+def write_lightgbm_summary_json(tmp_path: Path) -> Path:
+    path = tmp_path / "lightgbm_evaluation.json"
+    path.write_text(json.dumps(lightgbm_summary()), encoding="utf-8")
+    return path
+
+
 def test_report_cli_writes_markdown_file(tmp_path, capsys) -> None:
     summary_path = write_summary_json(tmp_path)
     output_path = tmp_path / "reports" / "ridge_evaluation.md"
@@ -284,6 +419,22 @@ def test_report_cli_writes_markdown_file(tmp_path, capsys) -> None:
     payload = json.loads(captured.out)
     assert payload == {"output_path": str(output_path)}
     assert "# Ridge Evaluation Report" in output_path.read_text(encoding="utf-8")
+
+
+def test_lightgbm_report_cli_writes_markdown_file(tmp_path, capsys) -> None:
+    from urbanflow.modeling.lightgbm_report_cli import main as lightgbm_report_main
+
+    summary_path = write_lightgbm_summary_json(tmp_path)
+    output_path = tmp_path / "reports" / "lightgbm_evaluation.md"
+
+    exit_code = lightgbm_report_main([str(summary_path), "--output", str(output_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload == {"output_path": str(output_path)}
+    assert "# LightGBM Evaluation Report" in output_path.read_text(encoding="utf-8")
 
 
 def test_report_cli_returns_two_when_output_exists_without_force(tmp_path, capsys) -> None:
@@ -329,6 +480,22 @@ def test_render_ridge_evaluation_report_script_help() -> None:
     assert "Render a Ridge evaluation Markdown report" in result.stdout
 
 
+def test_render_lightgbm_evaluation_report_script_help() -> None:
+    repository_root = Path(__file__).parents[3]
+    result = subprocess.run(
+        [
+            sys.executable,
+            repository_root / "scripts" / "render_lightgbm_evaluation_report.py",
+            "--help",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Render a LightGBM evaluation Markdown report" in result.stdout
+
+
 def test_checked_in_ridge_example_report_matches_renderer() -> None:
     repository_root = Path(__file__).parents[3]
     summary_path = (
@@ -339,3 +506,17 @@ def test_checked_in_ridge_example_report_matches_renderer() -> None:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
     assert render_ridge_evaluation_report(summary) == report_path.read_text(encoding="utf-8")
+
+
+def test_checked_in_lightgbm_example_report_matches_renderer() -> None:
+    repository_root = Path(__file__).parents[3]
+    summary_path = (
+        repository_root / "docs" / "examples" / "modeling" / "lightgbm_evaluation_summary.json"
+    )
+    report_path = (
+        repository_root / "docs" / "examples" / "modeling" / "lightgbm_evaluation_report.md"
+    )
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert render_lightgbm_evaluation_report(summary) == report_path.read_text(encoding="utf-8")
