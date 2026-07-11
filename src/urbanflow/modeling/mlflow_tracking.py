@@ -15,14 +15,42 @@ class MLflowTrackingError(ValueError):
     """Raised when a local evaluation summary cannot be tracked."""
 
 
+class MLflowRunInfo(Protocol):
+    run_id: str
+    experiment_id: str
+
+
+class MLflowActiveRun(Protocol):
+    info: MLflowRunInfo
+
+
+class MLflowRunContext(Protocol):
+    def __enter__(self) -> MLflowActiveRun:
+        """Open an MLflow run context."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object | None,
+    ) -> None:
+        """Close an MLflow run context."""
+
+
 class MLflowTrackingAdapter(Protocol):
     """Boundary for MLflow operations so tests can use a fake logger."""
 
     def set_tracking_uri(self, tracking_uri: str) -> None:
         """Configure the backing MLflow tracking store."""
 
+    def get_tracking_uri(self) -> str:
+        """Return the active MLflow tracking URI."""
+
     def set_experiment(self, experiment_name: str) -> None:
         """Select or create an MLflow experiment."""
+
+    def start_run(self) -> MLflowRunContext:
+        """Start one MLflow run."""
 
     def set_tags(self, tags: Mapping[str, str]) -> None:
         """Log run tags."""
@@ -35,6 +63,39 @@ class MLflowTrackingAdapter(Protocol):
 
     def log_artifact(self, local_path: Path, *, artifact_path: str | None = None) -> None:
         """Log one local artifact file."""
+
+
+class _MLflowModuleAdapter:
+    """Thin wrapper around MLflow's fluent API."""
+
+    def __init__(self) -> None:
+        import mlflow
+
+        self._mlflow: Any = mlflow
+
+    def set_tracking_uri(self, tracking_uri: str) -> None:
+        self._mlflow.set_tracking_uri(tracking_uri)
+
+    def get_tracking_uri(self) -> str:
+        return self._mlflow.get_tracking_uri()
+
+    def set_experiment(self, experiment_name: str) -> None:
+        self._mlflow.set_experiment(experiment_name)
+
+    def start_run(self) -> MLflowRunContext:
+        return self._mlflow.start_run()
+
+    def set_tags(self, tags: Mapping[str, str]) -> None:
+        self._mlflow.set_tags(dict(tags))
+
+    def log_params(self, params: Mapping[str, object]) -> None:
+        self._mlflow.log_params(dict(params))
+
+    def log_metric(self, key: str, value: float, *, step: int | None = None) -> None:
+        self._mlflow.log_metric(key, value, step=step)
+
+    def log_artifact(self, local_path: Path, *, artifact_path: str | None = None) -> None:
+        self._mlflow.log_artifact(str(local_path), artifact_path=artifact_path)
 
 
 @dataclass(frozen=True)
@@ -279,3 +340,65 @@ def validation_window_metric_steps(
         (index, _validation_metrics_for_window(_required_mapping(window, path=str(index))))
         for index, window in enumerate(validation_windows)
     ]
+
+
+def _is_known_mlflow_exception(exc: Exception) -> bool:
+    try:
+        from mlflow.exceptions import MlflowException
+    except ImportError:
+        return False
+    return isinstance(exc, MlflowException)
+
+
+def track_evaluation_summary(
+    model_name: str,
+    summary_json_path: Path,
+    *,
+    report_path: Path | None = None,
+    config: MLflowTrackingConfig | None = None,
+    adapter: MLflowTrackingAdapter | None = None,
+) -> MLflowRunResult:
+    """Track one existing local evaluation summary as one MLflow run."""
+
+    normalized_model_name = normalize_model_name(model_name)
+    tracking_config = config or MLflowTrackingConfig()
+    summary = load_evaluation_summary(summary_json_path)
+    if report_path is not None and not report_path.exists():
+        raise MLflowTrackingError(f"report Markdown does not exist: {report_path}")
+
+    run_params = tracking_params_from_summary(summary, model_name=normalized_model_name)
+    run_params["summary_json_path"] = str(summary_json_path)
+    if report_path is not None:
+        run_params["report_path"] = str(report_path)
+
+    tracking_adapter = adapter or _MLflowModuleAdapter()
+    try:
+        if tracking_config.tracking_uri is not None:
+            tracking_adapter.set_tracking_uri(tracking_config.tracking_uri)
+        tracking_adapter.set_experiment(tracking_config.experiment_name)
+
+        with tracking_adapter.start_run() as active_run:
+            tracking_adapter.set_tags(
+                tracking_tags_for_model(
+                    normalized_model_name,
+                    extra_tags=tracking_config.extra_tags,
+                )
+            )
+            tracking_adapter.log_params(run_params)
+            for key, value in final_test_metric_values(summary).items():
+                tracking_adapter.log_metric(key, value)
+            for step, metrics in validation_window_metric_steps(summary):
+                for key, value in metrics.items():
+                    tracking_adapter.log_metric(key, value, step=step)
+            tracking_adapter.log_artifact(summary_json_path, artifact_path="evaluation")
+            if report_path is not None:
+                tracking_adapter.log_artifact(report_path, artifact_path="reports")
+            return MLflowRunResult(
+                run_id=active_run.info.run_id,
+                experiment_id=active_run.info.experiment_id,
+                tracking_uri=tracking_adapter.get_tracking_uri(),
+            )
+    except Exception as exc:
+        if _is_known_mlflow_exception(exc):
+            raise MLflowTrackingError(f"MLflow tracking failed: {exc}") from exc
+        raise
