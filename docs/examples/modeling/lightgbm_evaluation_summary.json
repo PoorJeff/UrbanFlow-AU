@@ -1,0 +1,91 @@
+{
+  "final_test": {
+    "end": "2025-03-01T00:00:00+11:00",
+    "horizon_metrics": [
+      {
+        "forecast_horizon": 1,
+        "mae": 0.95,
+        "rmse": 1.45,
+        "row_count": 672,
+        "wape": 0.055
+      }
+    ],
+    "model_comparison": {
+      "lightgbm_wape": 0.055,
+      "relative_wape_improvement": 0.45,
+      "seasonal_naive_wape": 0.1
+    },
+    "name": "final_test_2025-02",
+    "overall": {
+      "mae": 0.95,
+      "rmse": 1.45,
+      "row_count": 672,
+      "wape": 0.055
+    },
+    "seasonal_naive_horizon_metrics": [
+      {
+        "forecast_horizon": 1,
+        "mae": 1.8,
+        "rmse": 2.3,
+        "row_count": 672,
+        "wape": 0.1
+      }
+    ],
+    "seasonal_naive_overall": {
+      "mae": 1.8,
+      "rmse": 2.3,
+      "row_count": 672,
+      "wape": 0.1
+    },
+    "start": "2025-02-01T00:00:00+11:00",
+    "train_end": "2025-02-01T00:00:00+11:00",
+    "training_row_count": 1488
+  },
+  "input_path": "docs/examples/modeling/synthetic_supervised_rows.csv",
+  "row_count": 1464,
+  "validation_window_count": 1,
+  "validation_windows": [
+    {
+      "end": "2025-02-01T00:00:00+11:00",
+      "horizon_metrics": [
+        {
+          "forecast_horizon": 1,
+          "mae": 1.0,
+          "rmse": 1.5,
+          "row_count": 744,
+          "wape": 0.065
+        }
+      ],
+      "model_comparison": {
+        "lightgbm_wape": 0.065,
+        "relative_wape_improvement": 0.2777777777777778,
+        "seasonal_naive_wape": 0.09
+      },
+      "name": "validation_2025-01",
+      "overall": {
+        "mae": 1.0,
+        "rmse": 1.5,
+        "row_count": 744,
+        "wape": 0.065
+      },
+      "seasonal_naive_horizon_metrics": [
+        {
+          "forecast_horizon": 1,
+          "mae": 1.4,
+          "rmse": 1.9,
+          "row_count": 744,
+          "wape": 0.09
+        }
+      ],
+      "seasonal_naive_overall": {
+        "mae": 1.4,
+        "rmse": 1.9,
+        "row_count": 744,
+        "wape": 0.09
+      },
+      "start": "2025-01-01T00:00:00+11:00",
+      "train_end": "2025-01-01T00:00:00+11:00",
+      "training_row_count": 744
+    }
+  ]
+}
