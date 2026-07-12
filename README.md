@@ -3,8 +3,9 @@
 UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand at selected City of Melbourne sensor locations. It will connect reproducible public-data ingestion, leakage-safe time-series evaluation, model serving, an operations dashboard, and MLOps monitoring.
 
 > **Project status:** foundation and local-baseline stage. Local ingestion,
-> persistence, feature-building, and baseline evaluation slices are in place,
-> but no production forecasting performance claims are made.
+> persistence, feature-building, baseline evaluation, reporting, and MLflow
+> tracking slices are in place, but no production forecasting performance
+> claims are made.
 
 ## Requirements
 
@@ -89,10 +90,10 @@ columns, and evaluates a Seasonal Naive baseline through chronological split
 utilities.
 
 The feature implementation is DataFrame-first so it can be tested without
-PostgreSQL, network access, MLflow, or model artifact persistence. The local
-Ridge and LightGBM baselines build on the same feature and split contracts;
-future slices can add database-backed training reads and MLflow tracking on top
-of this path.
+PostgreSQL, network access, or model artifact persistence. The local Ridge and
+LightGBM baselines build on the same feature and split contracts; future slices
+can add database-backed training reads and model artifact persistence on top of
+this path.
 
 ## Train a local Ridge baseline
 
@@ -101,9 +102,9 @@ the supervised feature rows. It uses the same rolling-origin windows and metrics
 as the Seasonal Naive baseline, keeps predictions in DataFrames, and remains
 local and deterministic.
 
-This Ridge slice does not add MLflow tracking, database-backed training reads,
-or model artifact persistence. Those pieces build on the current local training
-and evaluation contract.
+The Ridge evaluator stays local and file-based: it does not read training data
+from PostgreSQL or persist fitted model artifacts. MLflow tracking is available
+as a separate explicit command that logs existing evaluation evidence.
 
 To evaluate Ridge from an already-built supervised feature CSV, run:
 
@@ -162,9 +163,34 @@ A checked-in synthetic example report is available at
 [`docs/examples/modeling/lightgbm_evaluation_report.md`](docs/examples/modeling/lightgbm_evaluation_report.md).
 
 The generated LightGBM report includes exact metric tables, Mermaid metric
-charts, and a LightGBM versus Seasonal Naive comparison table. MLflow tracking,
-model artifact persistence, feature-importance plots, and production serving
-remain out of scope for this local baseline slice.
+charts, and a LightGBM versus Seasonal Naive comparison table. Model artifact
+persistence, feature-importance plots, and production serving remain future
+slices.
+
+## Track local evaluation artifacts with MLflow
+
+After generating a Ridge or LightGBM JSON summary and optional Markdown report,
+log those existing artifacts to MLflow with the explicit tracking command:
+
+```powershell
+$env:MLFLOW_ALLOW_FILE_STORE = "true"
+python scripts/track_modeling_evaluation.py lightgbm reports/modeling/lightgbm_evaluation.json --report reports/modeling/lightgbm_evaluation.md
+python scripts/track_modeling_evaluation.py ridge reports/modeling/ridge_evaluation.json --report reports/modeling/ridge_evaluation.md
+mlflow ui --backend-store-uri .\mlruns --port 5000
+```
+
+`MLFLOW_ALLOW_FILE_STORE=true` is required for the local filesystem-backed
+`mlruns/` store with current MLflow versions. `mlruns/` is generated local
+output and is ignored by Git. If you use a database or remote tracking server,
+pass `--tracking-uri` instead of relying on the local default.
+
+The tracking command does not train models, read PostgreSQL, or log the full
+supervised CSV. It records local evaluation evidence: run tags, parameters,
+final-test metrics, validation-window metrics with MLflow steps, the JSON
+summary under `evaluation/`, and the optional Markdown report under `reports/`.
+These runs document local baseline evidence, not production performance claims.
+Model registry workflows, Docker Compose MLflow services, and model artifact
+logging remain future slices.
 
 ## Validate a local raw snapshot
 
