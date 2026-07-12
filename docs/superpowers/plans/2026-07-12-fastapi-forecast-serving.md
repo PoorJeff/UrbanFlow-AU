@@ -29,6 +29,9 @@ httpx/FastAPI TestClient, pytest, Ruff.
   `503 model_unavailable` before sensor lookup.
 - Project-raised errors use
   `{"error":{"code":"...","message":"...","details":[]}}`.
+- Health aggregate status values are exactly `ok`, `degraded`, and
+  `unavailable`; responses include service, package/API version, UTC generation
+  time, component records, nullable model version, and nullable data cutoff.
 - History ranges require timezone-aware timestamps, use inclusive `start` and
   exclusive `end`, and are capped at 31 days.
 - Forecast horizons are integers from 1 through 24, default 24; a provider is
@@ -71,12 +74,12 @@ httpx/FastAPI TestClient, pytest, Ruff.
 
 **Behavior:**
 - Add the exact dependency bounds from Global Constraints.
-- Mount all five final route paths from the first app-factory commit so OpenAPI
-  establishes the complete surface; non-health routers may initially be empty
-  placeholders only until their task implements behavior.
+- Mount `/health` and establish the app-factory/router inclusion seam. Tasks 2
+  through 4 add the four business paths; do not create placeholder endpoints.
 - Default health includes `api_process`, `model_provider`, `data_store`, and
   `data_freshness`; unconfigured optional components make the aggregate status
   `degraded` with HTTP 200.
+- An injected `ok` result returns HTTP 200 with complete metadata.
 - An injected `HealthResult(status="unavailable")` returns HTTP 503.
 - Register one exception handler for project errors. Leave FastAPI/Pydantic's
   own request-validation response shape unchanged.
