@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 authors = [{ name = "UrbanFlow AU contributors" }]
 dependencies = [
     "alembic>=1.13,<2",
+    "fastapi>=0.139,<1",
     "httpx>=0.28,<1",
     "lightgbm>=4.6,<5",
     "mlflow>=3,<4",
@@ -21,6 +22,7 @@ dependencies = [
     "scikit-learn>=1.5,<2",
     "SQLAlchemy>=2.0,<3",
     "tenacity>=9,<10",
+    "uvicorn[standard]>=0.51,<1",
 ]
 
 [project.optional-dependencies]
