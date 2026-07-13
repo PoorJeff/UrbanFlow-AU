@@ -54,6 +54,23 @@ class HistoryResponse(BaseModel):
     data: list[HistoryPoint]
 
 
+class ForecastPredictionResponse(BaseModel):
+    forecast_horizon: int
+    target_at: datetime
+    predicted_count: float
+
+
+class ForecastResponse(BaseModel):
+    location_id: int
+    model_name: str
+    model_version: str | None = None
+    generated_at: datetime
+    forecast_origin_at: datetime
+    data_cutoff_at: datetime
+    horizon_hours: int
+    predictions: list[ForecastPredictionResponse]
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

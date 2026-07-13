@@ -1,22 +1,11 @@
-import asyncio
-
-import httpx
 from fastapi import FastAPI
 
+from tests.unit.api.helpers import api_get
 from urbanflow.api.app import create_app
 from urbanflow.api.errors import UrbanFlowApiError
 
 
-def get(application: FastAPI, path: str, **kwargs: object) -> httpx.Response:
-    async def send_request() -> httpx.Response:
-        transport = httpx.ASGITransport(app=application)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            return await client.get(path, **kwargs)
-
-    return asyncio.run(send_request())
-
-
-def test_create_app_exposes_the_health_sensor_and_history_routes() -> None:
+def test_create_app_exposes_the_first_fastapi_serving_routes() -> None:
     application = create_app()
 
     assert isinstance(application, FastAPI)
@@ -24,6 +13,7 @@ def test_create_app_exposes_the_health_sensor_and_history_routes() -> None:
         "/health",
         "/api/v1/sensors",
         "/api/v1/sensors/{location_id}/history",
+        "/api/v1/sensors/{location_id}/forecast",
     }
 
 
@@ -38,7 +28,7 @@ def test_project_errors_use_the_standard_error_response() -> None:
             message="No model provider is configured.",
         )
 
-    response = get(application, "/_test/project-error")
+    response = api_get(application, "/_test/project-error")
 
     assert response.status_code == 503
     assert response.json() == {
@@ -57,7 +47,7 @@ def test_request_validation_keeps_fastapi_response_shape() -> None:
     def requires_integer(value: int) -> dict[str, int]:
         return {"value": value}
 
-    response = get(application, "/_test/requires-integer", params={"value": "bad"})
+    response = api_get(application, "/_test/requires-integer", params={"value": "bad"})
 
     assert response.status_code == 422
     assert "detail" in response.json()

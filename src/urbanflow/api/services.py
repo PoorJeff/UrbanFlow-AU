@@ -47,6 +47,27 @@ class HistoryRepository(Protocol):
     ) -> list[HistoryRecord]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ForecastPrediction:
+    forecast_horizon: int
+    target_at: datetime
+    predicted_count: float
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastBatch:
+    model_name: str
+    model_version: str | None
+    generated_at: datetime
+    forecast_origin_at: datetime
+    data_cutoff_at: datetime
+    predictions: tuple[ForecastPrediction, ...]
+
+
+class ForecastModelProvider(Protocol):
+    def predict(self, location_id: int, horizon: int) -> ForecastBatch: ...
+
+
 class DataStoreUnavailableError(RuntimeError):
     """Raised by a configured API repository when its backing store cannot be read."""
 
@@ -81,20 +102,49 @@ class HistoryService:
         end: datetime,
     ) -> list[HistoryRecord]:
         _validate_history_range(start=start, end=end)
+        _ensure_sensor_exists(self.sensor_repository, location_id)
         try:
-            sensor = self.sensor_repository.get_sensor(location_id)
-            if sensor is None:
-                raise UrbanFlowApiError(
-                    status_code=404,
-                    code="sensor_not_found",
-                    message=f"Sensor {location_id} was not found.",
-                )
             records = self.history_repository.get_history(location_id, start, end)
         except DataStoreUnavailableError as exc:
             raise data_store_unavailable_error() from exc
         return sorted(
             (record for record in records if start <= record.observed_at < end),
             key=lambda record: record.observed_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastService:
+    sensor_repository: SensorRepository
+    model_provider: ForecastModelProvider | None
+
+    def forecast(self, location_id: int, horizon: int) -> ForecastBatch:
+        if self.model_provider is None:
+            raise UrbanFlowApiError(
+                status_code=503,
+                code="model_unavailable",
+                message="No forecast model is configured for serving.",
+            )
+        _ensure_sensor_exists(self.sensor_repository, location_id)
+        batch = self.model_provider.predict(location_id, horizon)
+        _validate_forecast_horizons(batch=batch, horizon=horizon)
+        return ForecastBatch(
+            model_name=batch.model_name,
+            model_version=batch.model_version,
+            generated_at=batch.generated_at,
+            forecast_origin_at=batch.forecast_origin_at,
+            data_cutoff_at=batch.data_cutoff_at,
+            predictions=tuple(
+                ForecastPrediction(
+                    forecast_horizon=prediction.forecast_horizon,
+                    target_at=prediction.target_at,
+                    predicted_count=max(prediction.predicted_count, 0.0),
+                )
+                for prediction in sorted(
+                    batch.predictions,
+                    key=lambda prediction: prediction.forecast_horizon,
+                )
+            ),
         )
 
 
@@ -118,12 +168,20 @@ class ApiServices:
     health: HealthService = default_health
     sensor_repository: SensorRepository = field(default_factory=EmptySensorRepository)
     history_repository: HistoryRepository = field(default_factory=EmptyHistoryRepository)
+    model_provider: ForecastModelProvider | None = None
 
     @property
     def history_service(self) -> HistoryService:
         return HistoryService(
             sensor_repository=self.sensor_repository,
             history_repository=self.history_repository,
+        )
+
+    @property
+    def forecast_service(self) -> ForecastService:
+        return ForecastService(
+            sensor_repository=self.sensor_repository,
+            model_provider=self.model_provider,
         )
 
 
@@ -150,3 +208,27 @@ def _validate_history_range(*, start: datetime, end: datetime) -> None:
 
 def _is_timezone_aware(value: datetime) -> bool:
     return value.tzinfo is not None and value.utcoffset() is not None
+
+
+def _ensure_sensor_exists(sensor_repository: SensorRepository, location_id: int) -> None:
+    try:
+        sensor = sensor_repository.get_sensor(location_id)
+    except DataStoreUnavailableError as exc:
+        raise data_store_unavailable_error() from exc
+    if sensor is None:
+        raise UrbanFlowApiError(
+            status_code=404,
+            code="sensor_not_found",
+            message=f"Sensor {location_id} was not found.",
+        )
+
+
+def _validate_forecast_horizons(*, batch: ForecastBatch, horizon: int) -> None:
+    expected_horizons = list(range(1, horizon + 1))
+    actual_horizons = sorted(prediction.forecast_horizon for prediction in batch.predictions)
+    if actual_horizons != expected_horizons:
+        raise UrbanFlowApiError(
+            status_code=503,
+            code="model_unavailable",
+            message="Forecast provider returned an incomplete horizon batch.",
+        )
