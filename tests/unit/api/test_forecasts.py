@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -186,6 +186,34 @@ def test_forecast_orders_rows_clips_counts_and_preserves_provider_metadata() -> 
         ],
     }
     assert provider.calls == [(101, 2)]
+
+
+@pytest.mark.parametrize(
+    "predicted_count",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "positive-infinity", "negative-infinity"],
+)
+def test_forecast_rejects_non_finite_provider_predictions(predicted_count: float) -> None:
+    batch = forecast_batch(1)
+    provider = RecordingForecastProvider(
+        batch=replace(
+            batch,
+            predictions=(replace(batch.predictions[0], predicted_count=predicted_count),),
+        )
+    )
+    services = ApiServices(
+        sensor_repository=InMemorySensorRepository(records=[make_sensor()]),
+        model_provider=provider,
+    )
+
+    response = api_get(
+        create_app(services=services),
+        "/api/v1/sensors/101/forecast",
+        params={"horizon": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "model_unavailable"
 
 
 @pytest.mark.parametrize("returned_horizons", [(1,), (1, 1)])

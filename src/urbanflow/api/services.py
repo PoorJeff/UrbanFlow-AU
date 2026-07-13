@@ -16,6 +16,7 @@ from urbanflow.api.errors import UrbanFlowApiError, data_store_unavailable_error
 from urbanflow.api.schemas import (
     ComponentHealth,
     FinalTestWindowResponse,
+    HealthComponents,
     HealthResult,
     ModelMetricsResponse,
     ModelMetricValues,
@@ -187,7 +188,7 @@ class ForecastService:
                 ForecastPrediction(
                     forecast_horizon=prediction.forecast_horizon,
                     target_at=prediction.target_at,
-                    predicted_count=max(prediction.predicted_count, 0.0),
+                    predicted_count=max(float(prediction.predicted_count), 0.0),
                 )
                 for prediction in sorted(
                     batch.predictions,
@@ -203,12 +204,12 @@ def default_health() -> HealthResult:
         service=API_SERVICE_NAME,
         version=__version__,
         generated_at=datetime.now(UTC),
-        components={
-            "api_process": ComponentHealth(status="available"),
-            "model_provider": ComponentHealth(status="unconfigured"),
-            "data_store": ComponentHealth(status="unconfigured"),
-            "data_freshness": ComponentHealth(status="unconfigured"),
-        },
+        components=HealthComponents(
+            api_process=ComponentHealth(status="available"),
+            model_provider=ComponentHealth(status="unconfigured"),
+            data_store=ComponentHealth(status="unconfigured"),
+            data_freshness=ComponentHealth(status="unconfigured"),
+        ),
     )
 
 
@@ -284,6 +285,21 @@ def _validate_forecast_horizons(*, batch: ForecastBatch, horizon: int) -> None:
             code="model_unavailable",
             message="Forecast provider returned an incomplete horizon batch.",
         )
+    if not all(
+        _is_finite_forecast_value(prediction.predicted_count) for prediction in batch.predictions
+    ):
+        raise UrbanFlowApiError(
+            status_code=503,
+            code="model_unavailable",
+            message="Forecast provider returned a non-finite predicted count.",
+        )
+
+
+def _is_finite_forecast_value(value: object) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _model_metrics_from_summary(summary: object) -> ModelMetricsResponse:

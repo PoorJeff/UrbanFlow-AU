@@ -13,12 +13,19 @@ class ComponentHealth(BaseModel):
     status: ComponentStatus
 
 
+class HealthComponents(BaseModel):
+    api_process: ComponentHealth
+    model_provider: ComponentHealth
+    data_store: ComponentHealth
+    data_freshness: ComponentHealth
+
+
 class HealthResult(BaseModel):
     status: HealthStatus
     service: str
     version: str
     generated_at: datetime
-    components: dict[str, ComponentHealth] = Field(default_factory=dict)
+    components: HealthComponents
     model_version: str | None = None
     data_cutoff_at: datetime | None = None
 

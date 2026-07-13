@@ -1,10 +1,28 @@
 from datetime import UTC, datetime
 
+import pytest
+from pydantic import ValidationError
+
 import urbanflow
 from tests.unit.api.helpers import api_get
 from urbanflow.api.app import create_app
-from urbanflow.api.schemas import ComponentHealth, HealthResult
+from urbanflow.api.schemas import ComponentHealth, HealthComponents, HealthResult
 from urbanflow.api.services import ApiServices
+
+
+def components(
+    *,
+    api_process: str = "available",
+    model_provider: str = "unconfigured",
+    data_store: str = "unconfigured",
+    data_freshness: str = "unconfigured",
+) -> HealthComponents:
+    return HealthComponents(
+        api_process=ComponentHealth(status=api_process),
+        model_provider=ComponentHealth(status=model_provider),
+        data_store=ComponentHealth(status=data_store),
+        data_freshness=ComponentHealth(status=data_freshness),
+    )
 
 
 def test_default_health_is_degraded_when_optional_components_are_unconfigured() -> None:
@@ -39,7 +57,12 @@ def test_health_returns_200_when_injected_result_is_ok() -> None:
             service="urbanflow-au-api",
             version=urbanflow.__version__,
             generated_at=generated_at,
-            components={"api_process": ComponentHealth(status="available")},
+            components=components(
+                api_process="available",
+                model_provider="available",
+                data_store="available",
+                data_freshness="available",
+            ),
             model_version="lightgbm-demo-v1",
             data_cutoff_at=data_cutoff_at,
         )
@@ -53,7 +76,12 @@ def test_health_returns_200_when_injected_result_is_ok() -> None:
         "service": "urbanflow-au-api",
         "version": urbanflow.__version__,
         "generated_at": "2026-07-12T10:30:00Z",
-        "components": {"api_process": {"status": "available"}},
+        "components": {
+            "api_process": {"status": "available"},
+            "model_provider": {"status": "available"},
+            "data_store": {"status": "available"},
+            "data_freshness": {"status": "available"},
+        },
         "model_version": "lightgbm-demo-v1",
         "data_cutoff_at": "2026-07-12T09:00:00Z",
     }
@@ -66,6 +94,7 @@ def test_health_returns_503_when_injected_result_is_unavailable() -> None:
             service="urbanflow-au-api",
             version=urbanflow.__version__,
             generated_at=datetime(2026, 7, 12, 10, 30, tzinfo=UTC),
+            components=components(api_process="unavailable"),
         )
     )
 
@@ -77,7 +106,22 @@ def test_health_returns_503_when_injected_result_is_unavailable() -> None:
         "service": "urbanflow-au-api",
         "version": urbanflow.__version__,
         "generated_at": "2026-07-12T10:30:00Z",
-        "components": {},
+        "components": {
+            "api_process": {"status": "unavailable"},
+            "model_provider": {"status": "unconfigured"},
+            "data_store": {"status": "unconfigured"},
+            "data_freshness": {"status": "unconfigured"},
+        },
         "model_version": None,
         "data_cutoff_at": None,
     }
+
+
+def test_health_result_requires_every_component_status() -> None:
+    with pytest.raises(ValidationError, match="components"):
+        HealthResult(
+            status="ok",
+            service="urbanflow-au-api",
+            version=urbanflow.__version__,
+            generated_at=datetime(2026, 7, 12, 10, 30, tzinfo=UTC),
+        )
