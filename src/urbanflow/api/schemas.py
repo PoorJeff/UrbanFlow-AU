@@ -71,6 +71,31 @@ class ForecastResponse(BaseModel):
     predictions: list[ForecastPredictionResponse]
 
 
+class FinalTestWindowResponse(BaseModel):
+    name: str
+    start: datetime
+    end: datetime
+
+
+class ModelMetricValues(BaseModel):
+    mae: float
+    rmse: float
+    wape: float
+    seasonal_naive_wape: float
+    relative_wape_improvement: float
+
+
+class ModelMetricsResponse(BaseModel):
+    model_name: str
+    model_version: str | None = None
+    evaluation_source: str
+    final_test_window: FinalTestWindowResponse
+    metrics: ModelMetricValues
+    mlflow_run_id: str | None = None
+    mlflow_tracking_uri: str | None = None
+    report_path: str | None = None
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

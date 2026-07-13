@@ -30,6 +30,14 @@ def data_store_unavailable_error() -> UrbanFlowApiError:
     )
 
 
+def metrics_unavailable_error() -> UrbanFlowApiError:
+    return UrbanFlowApiError(
+        status_code=503,
+        code="metrics_unavailable",
+        message="Model metrics are unavailable.",
+    )
+
+
 async def urbanflow_api_error_handler(
     _request: Request,
     error: UrbanFlowApiError,

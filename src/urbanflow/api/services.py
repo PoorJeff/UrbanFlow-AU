@@ -1,15 +1,32 @@
 from __future__ import annotations
 
+import json
+import math
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from pathlib import Path
+from typing import Any, Protocol
+
+from pydantic import ValidationError
 
 from urbanflow import __version__
 from urbanflow.api.errors import UrbanFlowApiError, data_store_unavailable_error
-from urbanflow.api.schemas import ComponentHealth, HealthResult
+from urbanflow.api.schemas import (
+    ComponentHealth,
+    FinalTestWindowResponse,
+    HealthResult,
+    ModelMetricsResponse,
+    ModelMetricValues,
+)
 
 API_SERVICE_NAME = "urbanflow-au-api"
 MAX_HISTORY_RANGE = timedelta(days=31)
+SUPPORTED_MODEL_COMPARISON_KEYS = {
+    "ridge_wape": "ridge",
+    "lightgbm_wape": "lightgbm",
+}
 
 
 class HealthService(Protocol):
@@ -68,8 +85,40 @@ class ForecastModelProvider(Protocol):
     def predict(self, location_id: int, horizon: int) -> ForecastBatch: ...
 
 
+class ModelMetadataProvider(Protocol):
+    def get_metrics(self) -> ModelMetricsResponse: ...
+
+
 class DataStoreUnavailableError(RuntimeError):
     """Raised by a configured API repository when its backing store cannot be read."""
+
+
+class MetricsUnavailableError(RuntimeError):
+    """Raised when configured model evaluation metadata cannot be read or validated."""
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationSummaryMetadataProvider:
+    path: Path | None
+
+    @classmethod
+    def from_environment(cls) -> EvaluationSummaryMetadataProvider:
+        configured_path = os.getenv("URBANFLOW_API_METRICS_PATH")
+        return cls(path=Path(configured_path) if configured_path else None)
+
+    def get_metrics(self) -> ModelMetricsResponse:
+        if self.path is None:
+            raise MetricsUnavailableError("no evaluation summary path is configured")
+        try:
+            summary = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MetricsUnavailableError("could not read evaluation summary") from exc
+        try:
+            return _model_metrics_from_summary(summary)
+        except ValidationError as exc:
+            raise MetricsUnavailableError(
+                "evaluation summary has an invalid response shape"
+            ) from exc
 
 
 class EmptySensorRepository:
@@ -169,6 +218,9 @@ class ApiServices:
     sensor_repository: SensorRepository = field(default_factory=EmptySensorRepository)
     history_repository: HistoryRepository = field(default_factory=EmptyHistoryRepository)
     model_provider: ForecastModelProvider | None = None
+    model_metadata_provider: ModelMetadataProvider = field(
+        default_factory=EvaluationSummaryMetadataProvider.from_environment
+    )
 
     @property
     def history_service(self) -> HistoryService:
@@ -232,3 +284,93 @@ def _validate_forecast_horizons(*, batch: ForecastBatch, horizon: int) -> None:
             code="model_unavailable",
             message="Forecast provider returned an incomplete horizon batch.",
         )
+
+
+def _model_metrics_from_summary(summary: object) -> ModelMetricsResponse:
+    root = _as_mapping(summary)
+    final_test = _required_mapping(root, "final_test")
+    overall = _required_mapping(final_test, "overall")
+    seasonal_naive_overall = _required_mapping(final_test, "seasonal_naive_overall")
+    comparison = _required_mapping(final_test, "model_comparison")
+    model_name = _infer_model_name(comparison)
+    _required_number(comparison, f"{model_name}_wape")
+    return ModelMetricsResponse(
+        model_name=model_name,
+        model_version=_optional_text(root, "model_version"),
+        evaluation_source="evaluation_summary",
+        final_test_window=FinalTestWindowResponse(
+            name=_required_text(final_test, "name"),
+            start=_required_text(final_test, "start"),
+            end=_required_text(final_test, "end"),
+        ),
+        metrics=ModelMetricValues(
+            mae=_required_number(overall, "mae"),
+            rmse=_required_number(overall, "rmse"),
+            wape=_required_number(overall, "wape"),
+            seasonal_naive_wape=_required_number(seasonal_naive_overall, "wape"),
+            relative_wape_improvement=_required_number(
+                comparison,
+                "relative_wape_improvement",
+            ),
+        ),
+        mlflow_run_id=_optional_text(root, "mlflow_run_id"),
+        mlflow_tracking_uri=_optional_text(root, "mlflow_tracking_uri"),
+        report_path=_optional_text(root, "report_path"),
+    )
+
+
+def _as_mapping(value: object) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise MetricsUnavailableError("evaluation summary must be a JSON object")
+    return value
+
+
+def _required_mapping(mapping: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = mapping.get(key)
+    if not isinstance(value, Mapping):
+        raise MetricsUnavailableError(f"missing or invalid evaluation summary field: {key}")
+    return value
+
+
+def _required_text(mapping: Mapping[str, Any], key: str) -> str:
+    value = mapping.get(key)
+    if not isinstance(value, str) or not value:
+        raise MetricsUnavailableError(f"missing or invalid evaluation summary field: {key}")
+    return value
+
+
+def _optional_text(mapping: Mapping[str, Any], key: str) -> str | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise MetricsUnavailableError(f"invalid optional evaluation summary field: {key}")
+    return value
+
+
+def _infer_model_name(comparison: Mapping[str, Any]) -> str:
+    model_names = [
+        model_name
+        for comparison_key, model_name in SUPPORTED_MODEL_COMPARISON_KEYS.items()
+        if comparison_key in comparison
+    ]
+    if len(model_names) != 1:
+        raise MetricsUnavailableError(
+            "evaluation summary must identify exactly one supported model"
+        )
+    return model_names[0]
+
+
+def _required_number(mapping: Mapping[str, Any], key: str) -> float:
+    value = mapping.get(key)
+    if isinstance(value, bool):
+        raise MetricsUnavailableError(f"missing or invalid evaluation summary metric: {key}")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MetricsUnavailableError(
+            f"missing or invalid evaluation summary metric: {key}"
+        ) from exc
+    if not math.isfinite(number):
+        raise MetricsUnavailableError(f"missing or invalid evaluation summary metric: {key}")
+    return number

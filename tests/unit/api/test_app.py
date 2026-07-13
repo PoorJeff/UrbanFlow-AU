@@ -14,6 +14,7 @@ def test_create_app_exposes_the_first_fastapi_serving_routes() -> None:
         "/api/v1/sensors",
         "/api/v1/sensors/{location_id}/history",
         "/api/v1/sensors/{location_id}/forecast",
+        "/api/v1/model/metrics",
     }
 
 
