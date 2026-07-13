@@ -23,6 +23,37 @@ class HealthResult(BaseModel):
     data_cutoff_at: datetime | None = None
 
 
+class SensorResponse(BaseModel):
+    location_id: int
+    sensor_name: str
+    sensor_description: str
+    status: str
+    latitude: float
+    longitude: float
+
+
+class SensorListMeta(BaseModel):
+    count: int
+    active_only: bool
+
+
+class SensorListResponse(BaseModel):
+    data: list[SensorResponse]
+    meta: SensorListMeta
+
+
+class HistoryPoint(BaseModel):
+    observed_at: datetime
+    pedestrian_count: int
+
+
+class HistoryResponse(BaseModel):
+    location_id: int
+    start: datetime
+    end: datetime
+    data: list[HistoryPoint]
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

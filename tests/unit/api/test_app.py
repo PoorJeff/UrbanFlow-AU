@@ -16,11 +16,15 @@ def get(application: FastAPI, path: str, **kwargs: object) -> httpx.Response:
     return asyncio.run(send_request())
 
 
-def test_create_app_exposes_only_the_health_route_for_task_one() -> None:
+def test_create_app_exposes_the_health_sensor_and_history_routes() -> None:
     application = create_app()
 
     assert isinstance(application, FastAPI)
-    assert set(application.openapi()["paths"]) == {"/health"}
+    assert set(application.openapi()["paths"]) == {
+        "/health",
+        "/api/v1/sensors",
+        "/api/v1/sensors/{location_id}/history",
+    }
 
 
 def test_project_errors_use_the_standard_error_response() -> None:

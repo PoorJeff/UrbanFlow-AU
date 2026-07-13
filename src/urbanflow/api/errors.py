@@ -22,6 +22,14 @@ class UrbanFlowApiError(Exception):
         self.details = [] if details is None else list(details)
 
 
+def data_store_unavailable_error() -> UrbanFlowApiError:
+    return UrbanFlowApiError(
+        status_code=503,
+        code="data_store_unavailable",
+        message="Sensor data is currently unavailable.",
+    )
+
+
 async def urbanflow_api_error_handler(
     _request: Request,
     error: UrbanFlowApiError,
