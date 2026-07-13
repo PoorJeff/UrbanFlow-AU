@@ -2,10 +2,11 @@
 
 UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand at selected City of Melbourne sensor locations. It will connect reproducible public-data ingestion, leakage-safe time-series evaluation, model serving, an operations dashboard, and MLOps monitoring.
 
-> **Project status:** foundation and local-baseline stage. Local ingestion,
-> persistence, feature-building, baseline evaluation, reporting, and MLflow
-> tracking slices are in place, but no production forecasting performance
-> claims are made.
+> **Project status:** foundation, local-baseline, and first FastAPI contract
+> boundary stage. Local ingestion, persistence, feature-building, baseline
+> evaluation, reporting, MLflow tracking, and a typed API boundary are in
+> place. Database-backed API reads, model artifacts, and production forecasting
+> performance claims are not yet in place.
 
 ## Requirements
 
@@ -32,6 +33,52 @@ python -m ruff check .
 python -m ruff format --check .
 python -m pytest
 ```
+
+## Run the first FastAPI API boundary
+
+Start the local API from an activated virtual environment:
+
+```powershell
+python -m uvicorn urbanflow.api.app:app --reload
+```
+
+The unversioned health probe is available at
+`http://127.0.0.1:8000/health`. FastAPI also generates interactive OpenAPI
+documentation at `http://127.0.0.1:8000/docs` and the raw schema at
+`http://127.0.0.1:8000/openapi.json`.
+
+Business routes are versioned under `/api/v1`:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors?active_only=true"
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/history?start=2026-07-01T00:00:00Z&end=2026-07-02T00:00:00Z"
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/forecast?horizon=24"
+```
+
+This is an honest API contract boundary, not production serving. The default
+process does not connect to PostgreSQL or Melbourne Open Data, so the sensor
+catalog is empty and default history requests return `404 sensor_not_found`
+until a repository is wired. It also does not load or train a forecast model:
+every default forecast request returns
+`503 model_unavailable` rather than a fabricated prediction. Database-backed
+repositories, model artifact loading, and a real forecast provider remain
+separate future slices.
+
+The model-metrics route reads an existing local evaluation-summary JSON only
+when it is explicitly configured. For example, the checked-in summary below is
+synthetic evaluation evidence, not a production-model claim:
+
+```powershell
+$env:URBANFLOW_API_METRICS_PATH = ".\docs\examples\modeling\lightgbm_evaluation_summary.json"
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/model/metrics
+```
+
+Without that environment variable, or if the summary is unusable,
+`GET /api/v1/model/metrics` returns `503 metrics_unavailable`. When a source
+summary lacks `model_version`, `mlflow_run_id`, `mlflow_tracking_uri`, or
+`report_path`, the response uses JSON `null`; the API never invents that
+metadata and never queries an MLflow server.
 
 ## Run sensor-location ingestion locally
 
@@ -245,8 +292,12 @@ running PostgreSQL service.
 1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is runnable locally; hourly-count ingestion has a bounded CSV export pipeline.
 2. Data validation, PostgreSQL persistence, and Prefect orchestration.
 3. Leakage-safe features, rolling-origin backtests, and MLflow tracking.
-4. FastAPI forecasts, Streamlit operations views, and Evidently monitoring.
-5. Docker Compose packaging, evaluation evidence, screenshots, and portfolio documentation.
+4. First FastAPI contract boundary: health, sensor/history contracts, an
+   injectable direct-forecast provider, and local evaluation-summary metrics.
+   This boundary is in place, but it does not yet include database-backed reads,
+   model artifact loading, or production forecasts.
+5. Streamlit operations views and Evidently monitoring.
+6. Docker Compose packaging, evaluation evidence, screenshots, and portfolio documentation.
 
 ## Data policy
 

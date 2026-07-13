@@ -249,10 +249,14 @@ MLflow 至少记录：
 必须提供以下端点：
 
 - `GET /health`：服务、模型、数据库和数据新鲜度；
-- `GET /sensors`：可用传感器及位置；
-- `GET /history/{location_id}`：指定时间范围的历史人流；
-- `GET /forecast/{location_id}?horizon=24`：未来 1 至 24 小时预测；
-- `GET /model/metrics`：模型版本和测试集指标。
+- `GET /api/v1/sensors`：可用传感器及位置；
+- `GET /api/v1/sensors/{location_id}/history`：指定时间范围的历史人流；
+- `GET /api/v1/sensors/{location_id}/forecast?horizon=24`：未来 1 至 24 小时预测；
+- `GET /api/v1/model/metrics`：模型版本和测试集指标。
+
+`/health` 保持未版本化，业务路由统一位于 `/api/v1`。FastAPI 服务代码位于
+`src/urbanflow/api`，首个切片先稳定 HTTP 契约；数据库读取、模型产物加载和生产预测
+provider 仍须在后续切片显式接入。
 
 API 要求：
 
@@ -323,10 +327,6 @@ urbanflow-au/
 ├── .github/workflows/ci.yml
 ├── app/
 │   └── streamlit_app.py
-├── api/
-│   ├── main.py
-│   ├── routes/
-│   └── schemas.py
 ├── data/
 │   ├── README.md
 │   ├── sample/
@@ -352,6 +352,17 @@ urbanflow-au/
 │   ├── database/
 │   ├── features/
 │   ├── modeling/
+│   ├── api/
+│   │   ├── app.py
+│   │   ├── dependencies.py
+│   │   ├── errors.py
+│   │   ├── schemas.py
+│   │   ├── services.py
+│   │   └── routers/
+│   │       ├── health.py
+│   │       ├── sensors.py
+│   │       ├── forecasts.py
+│   │       └── models.py
 │   ├── monitoring/
 │   └── orchestration/
 ├── tests/
