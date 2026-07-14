@@ -57,8 +57,11 @@ Use an explicit default-services builder in the app layer:
 2. a non-empty URL: construct an Engine and session factory without issuing a
    database query, then inject one PostgreSQL adapter for both sensor and
    history reads;
-3. an invalid non-empty URL: fail application construction with a configuration
-   error rather than silently presenting empty data.
+3. a malformed or unsupported non-empty URL that SQLAlchemy cannot turn into
+   an Engine: fail application construction with a configuration error rather
+   than silently presenting empty data;
+4. a syntactically accepted URL whose database is unreachable: preserve lazy
+   startup and return \`503 data_store_unavailable\` on the first failed read.
 
 Creating a SQLAlchemy Engine does not establish a database connection. The
 first connection happens only when an endpoint creates a session and executes
@@ -128,9 +131,12 @@ WHERE location_id = :location_id
 ORDER BY observed_at ASC
 ~~~
 
-The adapter passes timezone-aware values through unchanged. The existing
-\`HistoryService\` remains the authority for input validation, unknown-sensor
-handling, defensive range filtering, and final ordering.
+The adapter does not strip timezone information from an already aware ORM
+value and preserves its instant. PostgreSQL may normalize a \`timestamptz\`
+value to a different zone or offset representation, so the contract does not
+promise preservation of the original \`ZoneInfo\` object or offset text. The
+existing \`HistoryService\` remains the authority for input validation,
+unknown-sensor handling, defensive range filtering, and final ordering.
 
 ### Application wiring
 
@@ -169,6 +175,11 @@ The endpoint status is \`503\`. A missing sensor remains \`404 sensor_not_found\
 an empty interval for a known sensor remains a successful \`200\` response with
 an empty data list.
 
+A malformed or unsupported URL is a startup configuration failure because
+\`create_database_engine\` cannot create an Engine. A URL that can create an
+Engine but cannot reach its database is not probed at startup; its session or
+query failure follows the \`503 data_store_unavailable\` path above.
+
 This slice deliberately does not add a live database probe to \`/health\`.
 The current health response is configuration-oriented, and reporting a
 database as available without probing it would be misleading. Database
@@ -179,14 +190,23 @@ health and data-freshness checks are deferred to a dedicated health slice.
 Default tests must not require PostgreSQL, network access, model files, or an
 MLflow server.
 
+API unit tests that assert default behavior must explicitly remove
+\`URBANFLOW_DATABASE_URL\` with an autouse fixture or an equivalent local
+fixture. Configuration-wiring tests are the only tests that set the variable.
+This prevents a developer's ambient database URL from changing ordinary
+\`create_app()\` test behavior.
+
 Repository tests cover:
 
 1. all sensors and deterministic \`location_id\` ordering;
 2. \`active_only=true\` filtering for \`A\` versus \`I\`;
 3. known and unknown sensors;
 4. history start-inclusive/end-exclusive boundaries and ascending timestamps;
-5. preservation of aware datetimes while mapping rows;
-6. SQLAlchemy failures becoming \`DataStoreUnavailableError\`.
+5. an already aware controlled ORM value remains aware and represents the same
+   instant after adapter mapping;
+6. session-creation and statement-execution failures in each of
+   \`list_sensors\`, \`get_sensor\`, and \`get_history\` becoming
+   \`DataStoreUnavailableError\`.
 
 These tests use controlled SQLAlchemy sessions or session fakes and do not
 start a PostgreSQL service.
@@ -197,15 +217,22 @@ App-factory and endpoint tests cover:
 2. a configured URL creates PostgreSQL-backed default repositories without
    executing a query during app creation;
 3. injected \`ApiServices\` still wins over environment configuration;
-4. a repository read failure returns the existing \`503
-   data_store_unavailable\` response.
+4. a malformed or unsupported non-empty URL fails app construction rather
+   than falling back to empty repositories;
+5. an accepted but unreachable URL does not fail app construction and produces
+   \`503 data_store_unavailable\` when a repository read fails;
+6. list-sensor failure, history sensor-lookup failure, and history-query
+   failure each return the existing \`503 data_store_unavailable\` response.
 
 Add an opt-in manual PostgreSQL smoke command. It receives the existing
-\`URBANFLOW_SMOKE_DATABASE_URL\`, creates an isolated temporary schema, writes
-one sensor and one hourly observation through the existing persistence helpers,
-then reads them through \`PostgresSensorHistoryRepository\`. It verifies sensor
-visibility, \`A\` filtering, and history mapping before dropping the temporary
-schema. Routine pytest remains database-free.
+\`URBANFLOW_SMOKE_DATABASE_URL\`, creates an isolated temporary schema, and
+binds the adapter's session factory to the same schema-configured connection
+used to create and populate the tables. The smoke owns its own fixtures: one
+\`A\` sensor, one \`I\` sensor, and an hourly observation for the \`A\` sensor.
+It must not reuse the existing persistence-smoke sensor fixture, whose
+synthetic \`active\` status is intentionally outside this API contract. The
+smoke verifies all-sensor visibility, \`A\` filtering, and history mapping
+before dropping the temporary schema. Routine pytest remains database-free.
 
 ## Documentation
 
@@ -218,6 +245,11 @@ Update the README to show:
 
 The README must still state that real forecast serving needs a separately
 configured model artifact and provider.
+
+Update the FastAPI section of \`urbanflow-au_requirements.md\` to state that
+sensor and history reads can use PostgreSQL when explicitly configured. Keep
+model artifact loading and real forecast-provider work marked as future
+slices.
 
 ## Non-goals
 
@@ -265,10 +297,13 @@ The PostgreSQL API repository slice is complete when:
 - no database URL preserves default empty behavior and does not connect to
   PostgreSQL;
 - \`active_only=true\` returns only \`status == "A"\`;
-- history reads are time-zone-aware, ascending, and use \`[start, end)\`;
+- history reads remain timezone-aware, preserve instants, are ascending, and
+  use \`[start, end)\`;
 - database failures return \`503 data_store_unavailable\`;
 - no model, forecast, health-probe, migration, Dashboard, or external-data
   behavior changes;
 - unit tests remain network- and PostgreSQL-free;
 - the manual PostgreSQL read smoke is opt-in;
+- README and \`urbanflow-au_requirements.md\` accurately distinguish completed
+  PostgreSQL reads from still-deferred model serving;
 - Ruff, format checks, pytest, Uvicorn smoke, and GitHub Actions pass.
