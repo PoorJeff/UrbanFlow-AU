@@ -73,10 +73,12 @@ its read query.
 src/urbanflow/api/
 ├── app.py                 # build default services from optional DB configuration
 ├── services.py            # existing protocols and errors stay authoritative
-└── postgres.py            # PostgreSQL-to-API read adapter
+├── postgres.py            # PostgreSQL-to-API read adapter
+└── postgres_smoke.py      # opt-in temporary-schema adapter smoke logic
 
 tests/unit/api/
 ├── test_postgres_repositories.py
+├── test_postgres_smoke.py
 └── test_app.py            # default configuration wiring coverage
 
 scripts/
