@@ -21,39 +21,38 @@ class PostgresSensorHistoryRepository:
         if active_only:
             statement = statement.where(SensorDim.status == ACTIVE_SENSOR_STATUS)
         try:
-            session = self._session_factory()
-            sensors = session.scalars(statement).all()
+            with self._session_factory() as session:
+                return [
+                    SensorRecord(
+                        location_id=sensor.location_id,
+                        sensor_name=sensor.sensor_name,
+                        sensor_description=sensor.sensor_description,
+                        status=sensor.status,
+                        latitude=sensor.latitude,
+                        longitude=sensor.longitude,
+                    )
+                    for sensor in session.scalars(statement).all()
+                ]
         except SQLAlchemyError as exc:
             raise DataStoreUnavailableError("sensor data is unavailable") from exc
-        return [
-            SensorRecord(
-                location_id=sensor.location_id,
-                sensor_name=sensor.sensor_name,
-                sensor_description=sensor.sensor_description,
-                status=sensor.status,
-                latitude=sensor.latitude,
-                longitude=sensor.longitude,
-            )
-            for sensor in sensors
-        ]
 
     def get_sensor(self, location_id: int) -> SensorRecord | None:
         statement = select(SensorDim).where(SensorDim.location_id == location_id)
         try:
-            session = self._session_factory()
-            sensor = session.scalars(statement).one_or_none()
+            with self._session_factory() as session:
+                sensor = session.scalars(statement).one_or_none()
+                if sensor is None:
+                    return None
+                return SensorRecord(
+                    location_id=sensor.location_id,
+                    sensor_name=sensor.sensor_name,
+                    sensor_description=sensor.sensor_description,
+                    status=sensor.status,
+                    latitude=sensor.latitude,
+                    longitude=sensor.longitude,
+                )
         except SQLAlchemyError as exc:
             raise DataStoreUnavailableError("sensor data is unavailable") from exc
-        if sensor is None:
-            return None
-        return SensorRecord(
-            location_id=sensor.location_id,
-            sensor_name=sensor.sensor_name,
-            sensor_description=sensor.sensor_description,
-            status=sensor.status,
-            latitude=sensor.latitude,
-            longitude=sensor.longitude,
-        )
 
     def get_history(
         self,
@@ -71,14 +70,16 @@ class PostgresSensorHistoryRepository:
             .order_by(PedestrianHourlyFact.observed_at)
         )
         try:
-            session = self._session_factory()
-            facts = session.scalars(statement).all()
+            with self._session_factory() as session:
+                return [
+                    HistoryRecord(
+                        observed_at=fact.observed_at,
+                        pedestrian_count=fact.pedestrian_count,
+                    )
+                    for fact in sorted(
+                        session.scalars(statement).all(),
+                        key=lambda fact: fact.observed_at,
+                    )
+                ]
         except SQLAlchemyError as exc:
             raise DataStoreUnavailableError("sensor data is unavailable") from exc
-        return [
-            HistoryRecord(
-                observed_at=fact.observed_at,
-                pedestrian_count=fact.pedestrian_count,
-            )
-            for fact in sorted(facts, key=lambda fact: fact.observed_at)
-        ]

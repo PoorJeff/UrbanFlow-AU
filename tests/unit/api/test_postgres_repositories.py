@@ -46,8 +46,15 @@ class FakeSession:
         self._rows = rows or []
         self._scalars_error = scalars_error
         self._result_error = result_error
+        self.closed = False
         self.statements: list[object] = []
         self.scalar_result: FakeScalarResult | None = None
+
+    def __enter__(self) -> "FakeSession":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.closed = True
 
     def scalars(self, statement: object) -> FakeScalarResult:
         self.statements.append(statement)
@@ -101,10 +108,9 @@ def _fact(observed_at: datetime, *, pedestrian_count: int) -> PedestrianHourlyFa
 def test_list_sensors_maps_active_and_inactive_rows() -> None:
     active_sensor = _sensor(101, status="A")
     inactive_sensor = _sensor(102, status="I")
+    session = FakeSession([active_sensor, inactive_sensor])
 
-    records = _repository(FakeSession([active_sensor, inactive_sensor])).list_sensors(
-        active_only=False
-    )
+    records = _repository(session).list_sensors(active_only=False)
 
     assert records == [
         SensorRecord(
@@ -124,6 +130,7 @@ def test_list_sensors_maps_active_and_inactive_rows() -> None:
             longitude=144.9,
         ),
     ]
+    assert session.closed
 
 
 def test_list_sensors_active_query_filters_active_status_and_orders_by_location_id() -> None:
@@ -134,6 +141,7 @@ def test_list_sensors_active_query_filters_active_status_and_orders_by_location_
     sql = _compile(session.statements[0])
     assert "sensor_dim.status = 'A'" in sql
     assert "ORDER BY sensor_dim.location_id" in sql
+    assert session.closed
 
 
 def test_list_sensors_without_active_filter_has_no_status_predicate() -> None:
@@ -143,14 +151,16 @@ def test_list_sensors_without_active_filter_has_no_status_predicate() -> None:
 
     sql = _compile(session.statements[0])
     assert "WHERE sensor_dim.status" not in sql
+    assert session.closed
 
 
 def test_get_sensor_maps_one_row_and_returns_none_for_no_row() -> None:
     sensor = _sensor(101, status="A")
     session = FakeSession([sensor])
+    missing_session = FakeSession()
 
     record = _repository(session).get_sensor(101)
-    missing_record = _repository(FakeSession()).get_sensor(999)
+    missing_record = _repository(missing_session).get_sensor(999)
 
     assert record == SensorRecord(
         location_id=101,
@@ -164,6 +174,8 @@ def test_get_sensor_maps_one_row_and_returns_none_for_no_row() -> None:
     assert session.scalar_result is not None
     assert session.scalar_result.one_or_none_called
     assert "WHERE sensor_dim.location_id = 101" in _compile(session.statements[0])
+    assert session.closed
+    assert missing_session.closed
 
 
 def test_get_history_orders_aware_rows_and_compiles_half_open_range_query() -> None:
@@ -197,6 +209,7 @@ def test_get_history_orders_aware_rows_and_compiles_half_open_range_query() -> N
     assert "pedestrian_hourly_fact.observed_at >= '2026-07-02 00:00:00+00:00'" in sql
     assert "pedestrian_hourly_fact.observed_at < '2026-07-03 00:00:00+00:00'" in sql
     assert "ORDER BY pedestrian_hourly_fact.observed_at" in sql
+    assert session.closed
 
 
 @pytest.mark.parametrize(
@@ -246,10 +259,12 @@ def test_public_methods_translate_session_factory_failures(call: RepositoryCall)
     ],
 )
 def test_public_methods_translate_scalars_failures(call: RepositoryCall) -> None:
-    repository = _repository(FakeSession(scalars_error=SQLAlchemyError("query failed")))
+    session = FakeSession(scalars_error=SQLAlchemyError("query failed"))
+    repository = _repository(session)
 
     with pytest.raises(DataStoreUnavailableError):
         call(repository)
+    assert session.closed
 
 
 @pytest.mark.parametrize(
@@ -270,14 +285,18 @@ def test_public_methods_translate_scalars_failures(call: RepositoryCall) -> None
     ],
 )
 def test_all_failures_become_data_store_unavailable(call: RepositoryCall) -> None:
-    repository = _repository(FakeSession(result_error=SQLAlchemyError("result failed")))
+    session = FakeSession(result_error=SQLAlchemyError("result failed"))
+    repository = _repository(session)
 
     with pytest.raises(DataStoreUnavailableError):
         call(repository)
+    assert session.closed
 
 
 def test_one_or_none_failures_become_data_store_unavailable() -> None:
-    repository = _repository(FakeSession(result_error=SQLAlchemyError("result failed")))
+    session = FakeSession(result_error=SQLAlchemyError("result failed"))
+    repository = _repository(session)
 
     with pytest.raises(DataStoreUnavailableError):
         repository.get_sensor(101)
+    assert session.closed
