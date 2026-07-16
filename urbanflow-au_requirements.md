@@ -255,8 +255,9 @@ MLflow 至少记录：
 - `GET /api/v1/model/metrics`：模型版本和测试集指标。
 
 `/health` 保持未版本化，业务路由统一位于 `/api/v1`。FastAPI 服务代码位于
-`src/urbanflow/api`，首个切片先稳定 HTTP 契约；数据库读取、模型产物加载和生产预测
-provider 仍须在后续切片显式接入。
+`src/urbanflow/api`。当且仅当显式配置 `URBANFLOW_DATABASE_URL` 时，传感器和历史
+人流读取可通过 PostgreSQL repository 提供；未配置或仅空白 URL 时，服务保持不连接
+数据库的空默认行为。模型产物加载和真实 forecast provider 仍须在后续切片显式接入。
 
 API 要求：
 
@@ -356,6 +357,8 @@ urbanflow-au/
 │   │   ├── app.py
 │   │   ├── dependencies.py
 │   │   ├── errors.py
+│   │   ├── postgres.py
+│   │   ├── postgres_smoke.py
 │   │   ├── schemas.py
 │   │   ├── services.py
 │   │   └── routers/

@@ -2,11 +2,11 @@
 
 UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand at selected City of Melbourne sensor locations. It will connect reproducible public-data ingestion, leakage-safe time-series evaluation, model serving, an operations dashboard, and MLOps monitoring.
 
-> **Project status:** foundation, local-baseline, and first FastAPI contract
+> **Project status:** foundation, local-baseline, and first FastAPI serving
 > boundary stage. Local ingestion, persistence, feature-building, baseline
-> evaluation, reporting, MLflow tracking, and a typed API boundary are in
-> place. Database-backed API reads, model artifacts, and production forecasting
-> performance claims are not yet in place.
+> evaluation, reporting, MLflow tracking, and typed API reads are in place.
+> PostgreSQL-backed sensor and history reads are opt-in; model artifacts and
+> production forecasting performance claims are not yet in place.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ python -m ruff format --check .
 python -m pytest
 ```
 
-## Run the first FastAPI API boundary
+## Run the FastAPI API boundary
 
 Start the local API from an activated virtual environment:
 
@@ -56,14 +56,34 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/history?start=2026-0
 Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/forecast?horizon=24"
 ```
 
-This is an honest API contract boundary, not production serving. The default
+This is an honest API serving boundary, not production forecasting. The default
 process does not connect to PostgreSQL or Melbourne Open Data, so the sensor
-catalog is empty and default history requests return `404 sensor_not_found`
-until a repository is wired. It also does not load or train a forecast model:
-every default forecast request returns
-`503 model_unavailable` rather than a fabricated prediction. Database-backed
-repositories, model artifact loading, and a real forecast provider remain
-separate future slices.
+catalog is empty and default history requests return `404 sensor_not_found`.
+Set `URBANFLOW_DATABASE_URL` explicitly to serve persisted sensor and history
+rows through the PostgreSQL read adapter; a missing or blank URL intentionally
+keeps the empty/default behavior. The database must already have the project's
+migrations and persisted data.
+
+For example, start Uvicorn in one PowerShell window:
+
+```powershell
+$env:URBANFLOW_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
+python -m uvicorn urbanflow.api.app:app --reload
+```
+
+Then, in another PowerShell window, read active sensors and a bounded history
+range for one returned sensor:
+
+```powershell
+$activeSensors = Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors?active_only=true"
+$locationId = $activeSensors.data[0].location_id
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/$locationId/history?start=2026-07-01T00:00:00Z&end=2026-07-02T00:00:00Z"
+```
+
+The process still does not load or train a forecast model: every default
+forecast request returns `503 model_unavailable` rather than a fabricated
+prediction. Model artifact loading and a real forecast provider remain future
+slices.
 
 The model-metrics route reads an existing local evaluation-summary JSON only
 when it is explicitly configured. For example, the checked-in summary below is
@@ -282,20 +302,23 @@ row and one hourly-count row, verifies the row counts, then drops the schema.
 ```powershell
 $env:URBANFLOW_SMOKE_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
 python scripts/smoke_test_postgres_persistence.py
+python scripts/smoke_test_postgres_api.py
 ```
 
-This smoke test is manual by design, so routine unit tests do not require a
-running PostgreSQL service.
+The persistence smoke writes and counts synthetic rows. The API smoke creates
+and drops its own isolated schema, then checks the PostgreSQL sensor/history
+read adapter against exact active/inactive fixture statuses. Both are manual by
+design, so routine unit tests do not require a running PostgreSQL service.
 
 ## Planned delivery slices
 
 1. Melbourne sensor and hourly-count ingestion with immutable snapshots and manifests. Sensor-location ingestion is runnable locally; hourly-count ingestion has a bounded CSV export pipeline.
 2. Data validation, PostgreSQL persistence, and Prefect orchestration.
 3. Leakage-safe features, rolling-origin backtests, and MLflow tracking.
-4. First FastAPI contract boundary: health, sensor/history contracts, an
-   injectable direct-forecast provider, and local evaluation-summary metrics.
-   This boundary is in place, but it does not yet include database-backed reads,
-   model artifact loading, or production forecasts.
+4. First FastAPI serving boundary: health, opt-in PostgreSQL-backed
+   sensor/history reads, an injectable direct-forecast provider, and local
+   evaluation-summary metrics. Model artifact loading and production forecasts
+   remain future slices.
 5. Streamlit operations views and Evidently monitoring.
 6. Docker Compose packaging, evaluation evidence, screenshots, and portfolio documentation.
 

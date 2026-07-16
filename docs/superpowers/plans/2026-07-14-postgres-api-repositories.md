@@ -78,7 +78,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
 - Later tasks inject one instance into both \`ApiServices.sensor_repository\`
   and \`ApiServices.history_repository\`.
 
-- [ ] **Step 1: Write focused failing adapter tests**
+- [x] **Step 1: Write focused failing adapter tests**
 
   Create test-only controlled session helpers that record the \`Select\`
   statement and return prepared ORM objects without a database. Import \`UTC\`
@@ -155,7 +155,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
      every row-consumption failure is also translated to
      \`DataStoreUnavailableError\`.
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
   Run:
 
@@ -166,7 +166,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected: collection fails because \`urbanflow.api.postgres\` and
   \`PostgresSensorHistoryRepository\` do not exist.
 
-- [ ] **Step 3: Implement the smallest adapter**
+- [x] **Step 3: Implement the smallest adapter**
 
   Create \`src/urbanflow/api/postgres.py\` with a single active-status constant,
   small mapping helpers, and one error wrapper:
@@ -226,7 +226,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   field mappings. Do not catch non-SQLAlchemy programming errors and do not
   add router or FastAPI imports.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
   Run:
 
@@ -239,7 +239,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected: all new repository tests pass; Ruff reports no findings and no
   formatting changes.
 
-- [ ] **Step 5: Commit the adapter task**
+- [x] **Step 5: Commit the adapter task**
 
   ~~~powershell
   git add src/urbanflow/api/postgres.py tests/unit/api/test_postgres_repositories.py
@@ -271,7 +271,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   public app factory. Explicit \`services\` always bypasses
   \`create_default_services\`.
 
-- [ ] **Step 1: Add failing default-wiring tests and collection-time isolation**
+- [x] **Step 1: Add failing default-wiring tests and collection-time isolation**
 
   Add \`tests/conftest.py\`:
 
@@ -336,7 +336,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   7. inject a sentinel \`ApiServices\` into \`create_app\` while a database URL
     is configured, and assert \`application.state.services is sentinel\`.
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
   Run:
 
@@ -346,7 +346,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
 
   Expected: import or attribute failure for \`create_default_services\`.
 
-- [ ] **Step 3: Implement lazy default service construction**
+- [x] **Step 3: Implement lazy default service construction**
 
   In \`app.py\`, add:
 
@@ -384,7 +384,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   and the new adapter. Do not perform \`engine.connect()\`, add a health probe,
   or create a model provider.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
   Run:
 
@@ -397,7 +397,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected: configured and unconfigured wiring paths pass without a network or
   PostgreSQL server.
 
-- [ ] **Step 5: Commit the wiring task**
+- [x] **Step 5: Commit the wiring task**
 
   ~~~powershell
   git add src/urbanflow/api/app.py tests/conftest.py tests/unit/api/test_app.py
@@ -419,7 +419,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
 - Produces complete HTTP coverage for list reads, sensor lookup reads, and
   history-query reads when storage is unavailable.
 
-- [ ] **Step 1: Add the missing history sensor-lookup failure test**
+- [x] **Step 1: Add the missing history sensor-lookup failure test**
 
   Define a minimal test-only repository:
 
@@ -439,7 +439,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Together, the three tests prove the router/service paths that the new
   PostgreSQL adapter can trigger.
 
-- [ ] **Step 2: Run the focused test and record the existing contract**
+- [x] **Step 2: Run the focused test and record the existing contract**
 
   Run:
 
@@ -452,13 +452,13 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   error. This is a characterization test that protects a pre-existing route
   behavior newly exercised by the PostgreSQL adapter.
 
-- [ ] **Step 3: Keep production code unchanged**
+- [x] **Step 3: Keep production code unchanged**
 
   Do not modify \`src/urbanflow/api/services.py\` or router production code in
   this task. The purpose is to document the existing lookup-failure behavior
   before the PostgreSQL adapter is used at runtime.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
   Run:
 
@@ -471,7 +471,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected: all storage-unavailable HTTP paths return the same project error
   response; focused tests add no warnings.
 
-- [ ] **Step 5: Commit the HTTP coverage task**
+- [x] **Step 5: Commit the HTTP coverage task**
 
   ~~~powershell
   git add tests/unit/api/test_sensors.py tests/unit/api/test_history.py
@@ -510,7 +510,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   ) -> int: ...
   ~~~
 
-- [ ] **Step 1: Write failing unit tests for the smoke CLI and safety**
+- [x] **Step 1: Write failing unit tests for the smoke CLI and safety**
 
   Mirror the project’s \`tests/unit/database/test_smoke.py\` style:
 
@@ -523,7 +523,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   5. the script \`--help\` exits successfully and names the API repository
      smoke.
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
   Run:
 
@@ -534,7 +534,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected: collection fails because \`urbanflow.api.postgres_smoke\` and the
   thin script do not exist.
 
-- [ ] **Step 3: Implement the isolated-schema smoke**
+- [x] **Step 3: Implement the isolated-schema smoke**
 
   Implement a safe lowercase schema-name validator and generated
   \`urbanflow_api_smoke_<12-hex>\` name in \`postgres_smoke.py\`. Import
@@ -572,7 +572,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
       raise SystemExit(main())
   ~~~
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
   Run:
 
@@ -592,7 +592,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected manual result: JSON with \`active_sensor_location_ids:[999001]\`,
   \`all_sensor_location_ids:[999001,999002]\`, and \`history_count:1\`.
 
-- [ ] **Step 5: Commit the smoke task**
+- [x] **Step 5: Commit the smoke task**
 
   ~~~powershell
   git add src/urbanflow/api/postgres_smoke.py scripts/smoke_test_postgres_api.py tests/unit/api/test_postgres_smoke.py
@@ -613,7 +613,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
 - Produces accurate project-status and local-run documentation without claiming
   a deployed forecast model.
 
-- [ ] **Step 1: Update the user-facing documentation**
+- [x] **Step 1: Update the user-facing documentation**
 
   In the README FastAPI section:
 
@@ -634,7 +634,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   configured. Keep model artifact loading and the real forecast provider marked
   as future work.
 
-- [ ] **Step 2: Mark plan tasks and run focused documentation checks**
+- [x] **Step 2: Mark plan tasks and run focused documentation checks**
 
   Change every completed task checkbox in this plan from \`[ ]\` to \`[x]\`.
   Run:
@@ -652,7 +652,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   Expected: no whitespace errors, no Ruff findings, and every file already
   formatted.
 
-- [ ] **Step 3: Run the full verification gate**
+- [x] **Step 3: Run the full verification gate**
 
   Run:
 
@@ -731,7 +731,7 @@ Pydantic 2, pytest, httpx ASGI transport, Uvicorn 0.51.x, Ruff.
   paths, and with no `URBANFLOW_DATABASE_URL`, `GET /api/v1/sensors` is `200`
   with an empty `data` list.
 
-- [ ] **Step 4: Commit the documentation and closeout**
+- [x] **Step 4: Commit the documentation and closeout**
 
   ~~~powershell
   git add README.md urbanflow-au_requirements.md docs/superpowers/plans/2026-07-14-postgres-api-repositories.md
