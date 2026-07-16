@@ -53,8 +53,9 @@ Run this once from the feature worktree before Task 1. Do not begin code changes
 ~~~powershell
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path .\.venv\Scripts\python.exe)) {
-    py -3.11 -m venv .venv
+    python -m venv .venv
 }
+& .\.venv\Scripts\python.exe -c "import sys; assert sys.version_info >= (3, 11), sys.version"
 & .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 & .\.venv\Scripts\python.exe -c "import urbanflow, fastapi, joblib; print(urbanflow.__version__)"
 & .\.venv\Scripts\python.exe -m ruff check .
