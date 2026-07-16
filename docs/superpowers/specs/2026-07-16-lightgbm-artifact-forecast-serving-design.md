@@ -89,9 +89,11 @@ preprocessing pipeline. `manifest.json` has this versioned, JSON-only shape:
   "model_name": "lightgbm",
   "model_version": "lightgbm-<first-12-sha256-hex>",
   "model_sha256": "<64-lowercase-hex>",
+  "training_data_sha256": "<64-lowercase-hex>",
   "created_at": "2026-07-16T00:00:00+00:00",
   "trained_through_at": "2026-07-15T23:00:00+00:00",
   "training_row_count": 1234,
+  "feature_timezone": "Australia/Melbourne",
   "feature_columns": ["forecast_horizon", "pedestrian_count"],
   "model_config": {
     "n_estimators": 100,
@@ -101,7 +103,9 @@ preprocessing pipeline. `manifest.json` has this versioned, JSON-only shape:
     "min_child_samples": 20,
     "random_state": 42
   },
-  "public_holidays": [],
+  "holiday_calendar_start": "2026-01-01",
+  "holiday_calendar_end": "2026-12-31",
+  "public_holidays": ["2026-01-26"],
   "evaluation_summary_path": null
 }
 ```
@@ -112,17 +116,44 @@ The actual exported `feature_columns` list is the complete ordered
 rows used to fit the artifact; it is distinct from each request's live
 `data_cutoff_at`.
 
+Schema version `1` has a deliberately closed contract. `schema_version` is the
+integer `1`; `model_name` is exactly `"lightgbm"`; both SHA-256 fields are
+64 lowercase hexadecimal characters; and `model_version` is exactly
+`lightgbm-` plus the first twelve characters of `model_sha256`. `created_at`
+and `trained_through_at` are offset-bearing ISO-8601 timestamps,
+`training_row_count` is a positive non-boolean integer, and
+`feature_timezone` is exactly `Australia/Melbourne`. The ordered manifest
+feature columns must match both the deserialized model's `feature_columns` and
+its `config.feature_spec.feature_columns`; the serving slice supports only the
+project's existing default feature specification. The six scalar model-config
+values must equal the deserialized `LightGBMModelConfig` values:
+`n_estimators`, `num_leaves`, and `min_child_samples` are positive integers;
+`learning_rate` is finite and positive; `max_depth` is an integer not below
+`-1`; and `random_state` is an integer. `training_data_sha256` is the SHA-256
+of the exact source CSV bytes, retained for local provenance rather than as an
+artifact-version substitute.
+
+The embedded holiday calendar is local, explicit, and self-contained:
+`holiday_calendar_start` and `holiday_calendar_end` are inclusive ISO dates;
+the start is not after the end; and `public_holidays` is a sorted, duplicate-free
+list of ISO dates contained by that coverage. It is not inferred from the
+supervised CSV and is never downloaded. A forecast is available only when all
+of its future target dates are within this coverage. This makes an exhausted
+calendar a truthful service-input failure rather than silently marking unknown
+future holidays as ordinary days.
+
 The exporter serializes the model to a temporary sibling directory, calculates
 the SHA-256 of `model.joblib`, writes the manifest, then renames the directory
 into the requested new destination. It refuses an existing destination rather
 than overwriting an artifact. This prevents a partial bundle from appearing at
 the configured path.
 
-The loader validates the manifest schema, exact model name, model checksum,
-artifact schema version, ordered feature columns, and model configuration
-before accepting the deserialized object. `joblib` artifacts are only safe when
-their containing directory is operator-controlled; the service must never load
-an artifact obtained from an untrusted source.
+The loader validates the complete manifest contract above, exact model name,
+model checksum, model-version derivation, artifact schema version, ordered
+feature columns, timezone, calendar coverage, and model configuration before
+accepting the deserialized object. `joblib` is a direct runtime dependency and
+artifacts are only safe when their containing directory is operator-controlled;
+the service must never load an artifact obtained from an untrusted source.
 
 ## Export path
 
@@ -131,16 +162,29 @@ Add a CLI such as:
 ```powershell
 python scripts/export_lightgbm_artifact.py `
   data/modeling/supervised_rows.csv `
-  models/lightgbm/local-demo
+  models/lightgbm/local-demo `
+  --holiday-calendar data/modeling/holiday_calendar.json
 ```
 
 The command reads the existing supervised CSV, parses its timestamp columns,
-fits one `FittedLightGBMModel` using only non-missing targets, and writes the
-bundle described above. Its LightGBM arguments match the existing evaluator's
+fits one final `FittedLightGBMModel` using every non-missing target row in that
+operator-supplied CSV, and writes the bundle described above. It does not reuse
+the rolling evaluator or claim that its final fit is a new evaluation. Its
+LightGBM arguments match the existing evaluator's
 parameters (`n_estimators`, `learning_rate`, `num_leaves`, and
 `min_child_samples`) so the export configuration is explicit and reproducible.
 It returns `2` for invalid input or output paths and `1` for serialization
 failures. It does not call MLflow, contact a database, or download data.
+
+`--holiday-calendar` points to a local JSON object with exactly
+`coverage_start`, `coverage_end`, and `public_holidays` keys; the first two are
+inclusive ISO dates and the last is an array of ISO dates. The exporter copies
+the validated calendar into the manifest. Since this serving slice has no
+weather source, it also rejects a training frame in which an eligible row has
+an observed `temperature`, `rainfall`, or `wind_speed` value, or marks one of
+those fields as not missing. Consequently, the fitted artifact and serving
+feature builder both use the existing explicit-weather-missing behavior rather
+than silently relying on an imputer to conceal a training-serving skew.
 
 The optional `evaluation_summary_path` is recorded only as operator-supplied
 metadata. It does not cause the exporter to claim a registry version or query
@@ -179,6 +223,13 @@ This is deliberately stricter than the training pipeline's missing-value
 markers: serving must not silently use median-imputed lag/rolling values after
 a data gap.
 
+Hourly continuity is checked on UTC instants, so a Melbourne daylight-saving
+transition remains a one-hour sequence. After validation, every instant is
+converted to the project's named `Australia/Melbourne` timezone before it is
+given to `build_supervised_frame(...)`; therefore calendar hour, weekday, and
+holiday features retain the same local-time semantics used by training even
+when PostgreSQL returns UTC timestamps.
+
 ## Provider and feature construction
 
 Introduce an `ArtifactBackedLightGBMForecastProvider` that consumes a validated
@@ -205,6 +256,9 @@ the existing direct multi-horizon rule remains intact: all lag and rolling
 features are anchored to observed history at the cutoff, while calendar values
 describe each known future target timestamp. Weather columns retain the current
 explicitly-missing values and markers; this slice does not add weather data.
+Before feature construction, it verifies that each requested target date is
+within the manifest calendar coverage; a manifest cannot silently classify an
+uncovered future date as non-holiday.
 
 `generated_at` is the UTC request-time timestamp. `model_name` is
 `"lightgbm"`; `model_version` comes from the validated manifest and is never
@@ -235,7 +289,7 @@ At request time:
 | no usable provider/artifact | existing `503 model_unavailable` |
 | unknown sensor with a usable provider | existing `404 sensor_not_found` |
 | PostgreSQL session/query failure | existing `503 data_store_unavailable` |
-| fewer than 168 rows, a gap, invalid timestamp, or invalid count | new `503 forecast_unavailable` with message `"Forecast cannot be generated from the available history."` |
+| fewer than 168 rows, a gap, invalid timestamp/count, or uncovered future holiday date | new `503 forecast_unavailable` with message `"Forecast cannot be generated from the available history."` |
 | provider returns an incomplete/non-finite batch | existing `503 model_unavailable` |
 
 `ForecastService` catches `DataStoreUnavailableError` raised from provider
@@ -252,15 +306,19 @@ precedence over sensor lookup, matching the current `ForecastService` ordering.
 Routine tests remain fully offline and PostgreSQL-free.
 
 1. Artifact tests use temporary paths and a small deterministic LightGBM frame
-   to verify export/load round trips, manifest fields, checksum mismatch,
-   missing files, unsupported schema version, wrong model name, invalid feature
-   contract, and refusal to overwrite an existing output directory.
+   to verify export/load round trips, manifest fields, checksum/version mismatch,
+   missing files, unsupported schema version, wrong model name, naive timestamps,
+   invalid feature/config contract, malformed or uncovered holiday calendars,
+   weather-incompatible input, and refusal to overwrite an existing output
+   directory.
 2. Provider tests inject an in-memory recent-history repository and a loaded
    temporary artifact. They prove all direct horizons are returned in order,
    cutoff and target timestamps are correct, no row after the cutoff affects
    features, and predictions are non-negative at the API boundary.
-3. Provider failure tests cover exactly 167 rows, an hourly gap, a naive
-   timestamp, a negative/non-integer count, and repository failures.
+3. Provider failure tests cover exactly 167 rows, an hourly gap, a naive or
+   non-hour timestamp, a negative/non-integer count, calendar coverage expiry,
+   repository failures, and a Melbourne daylight-saving transition supplied in
+   UTC timestamps.
 4. PostgreSQL adapter tests compile the recent-history statement and prove its
    location predicate, descending limit query, ascending returned records, and
    error translation.
@@ -268,7 +326,8 @@ Routine tests remain fully offline and PostgreSQL-free.
    real database or artifact path. Explicit injected `ApiServices` continues
    to bypass all environment-driven construction.
 6. The full Ruff, format, pytest, and bounded Uvicorn `/health` smoke remain
-   required. A manual PostgreSQL-and-artifact smoke is optional and only runs
+   required. CI runs the same bounded default-configured health smoke after
+   pytest. A manual PostgreSQL-and-artifact smoke is optional and only runs
    when the operator explicitly provides both local resources.
 
 ## Alternatives considered
