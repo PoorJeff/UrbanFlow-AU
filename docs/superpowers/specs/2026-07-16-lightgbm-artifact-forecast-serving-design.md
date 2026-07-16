@@ -289,7 +289,7 @@ At request time:
 | no usable provider/artifact | existing `503 model_unavailable` |
 | unknown sensor with a usable provider | existing `404 sensor_not_found` |
 | PostgreSQL session/query failure | existing `503 data_store_unavailable` |
-| fewer than 168 rows, a gap, invalid timestamp/count, or uncovered future holiday date | new `503 forecast_unavailable` with message `"Forecast cannot be generated from the available history."` |
+| fewer than 168 rows, a gap, invalid timestamp/count, or uncovered future holiday date | new `503 forecast_unavailable` with message `"Forecast cannot be generated from the available serving inputs."` |
 | provider returns an incomplete/non-finite batch | existing `503 model_unavailable` |
 
 `ForecastService` catches `DataStoreUnavailableError` raised from provider
