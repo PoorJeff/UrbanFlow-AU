@@ -9,6 +9,7 @@ from urbanflow.api.services import (
     ApiServices,
     DataStoreUnavailableError,
     HistoryRecord,
+    SensorRecord,
 )
 
 
@@ -26,6 +27,14 @@ class InMemoryHistoryRepository:
         if self.fail_on_read:
             raise DataStoreUnavailableError("history is unavailable")
         return list(self.records)
+
+
+class FailingLookupSensorRepository:
+    def list_sensors(self, active_only: bool) -> list[SensorRecord]:
+        return []
+
+    def get_sensor(self, location_id: int) -> SensorRecord | None:
+        raise DataStoreUnavailableError("sensor lookup is unavailable")
 
 
 def test_history_returns_rows_in_observed_time_order() -> None:
@@ -140,6 +149,26 @@ def test_history_returns_sensor_not_found_before_reading_history() -> None:
     assert response.json()["error"] == {
         "code": "sensor_not_found",
         "message": "Sensor 101 was not found.",
+        "details": [],
+    }
+
+
+def test_history_returns_a_project_error_for_sensor_lookup_data_store_failure() -> None:
+    services = ApiServices(
+        sensor_repository=FailingLookupSensorRepository(),
+        history_repository=InMemoryHistoryRepository(records=[]),
+    )
+
+    response = api_get(
+        create_app(services=services),
+        "/api/v1/sensors/101/history",
+        params={"start": "2026-07-02T00:00:00Z", "end": "2026-07-03T00:00:00Z"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"] == {
+        "code": "data_store_unavailable",
+        "message": "Sensor data is currently unavailable.",
         "details": [],
     }
 
