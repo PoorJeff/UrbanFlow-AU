@@ -648,6 +648,8 @@ Use a small recording model only in the feature-semantics test. Its predict meth
 
 Parameterize failure tests for 167 records, 169 records, reverse order, an exact one-hour gap, a naive timestamp, a minute=30 timestamp, a bool count, a float count, a negative count, and a calendar that does not cover the target day. Each must raise ForecastInputUnavailableError before model.predict is called. Separately cover True, 0, 25, and a non-integral horizon; each must fail before either repository or model is called. A repository DataStoreUnavailableError must propagate unchanged for ForecastService to map in Task 3.
 
+Use a recording model that returns fewer prediction values than requested and call the provider through ForecastService with an existing sensor. The provider must not relabel this malformed model output as ForecastInputUnavailableError; the resulting incomplete ForecastBatch must reach the existing service validation and produce `503 model_unavailable`.
+
 - [ ] **Step 2: Run the focused provider test and confirm RED**
 
 Run:
@@ -736,7 +738,7 @@ if rows["forecast_horizon"].tolist() != list(range(1, horizon + 1)):
     raise ForecastInputUnavailableError("could not construct direct forecast rows")
 ~~~
 
-predict validates horizon first, then obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
+predict validates horizon first, then obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Do not classify a short or non-finite model output as ForecastInputUnavailableError: materialize a possibly incomplete batch without strict zip semantics so ForecastService's existing provider-output checks retain the `model_unavailable` contract. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
 
 - [ ] **Step 4: Run focused verification**
 

@@ -279,6 +279,11 @@ feature construction, it verifies that each resulting Melbourne-local target
 date is within the manifest calendar coverage; a manifest cannot silently
 classify an uncovered future date as non-holiday.
 
+Malformed model output is not a serving-input failure. If a provider returns
+an incomplete or non-finite batch, the existing service-level provider-output
+validation retains the `503 model_unavailable` response; the provider must not
+relabel that condition as `forecast_unavailable`.
+
 `generated_at` is the UTC request-time timestamp. `model_name` is
 `"lightgbm"`; `model_version` comes from the validated manifest and is never
 invented. The API service retains its existing non-negative clipping as the
