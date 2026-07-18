@@ -12,10 +12,12 @@ import urbanflow.api.app as app_module
 from tests.unit.api.helpers import api_get
 from urbanflow.api.app import create_app
 from urbanflow.api.errors import UrbanFlowApiError
+from urbanflow.api.lightgbm_provider import ArtifactBackedLightGBMForecastProvider
 from urbanflow.api.postgres import PostgresSensorHistoryRepository
 from urbanflow.api.services import ApiServices, EmptyHistoryRepository, EmptySensorRepository
 from urbanflow.database.config import DATABASE_URL_ENV_VAR, DatabaseConfigError
 from urbanflow.database.models import PedestrianHourlyFact, SensorDim
+from urbanflow.modeling.lightgbm_artifact import LightGBMArtifactError
 
 
 class FakeScalarResult:
@@ -116,7 +118,16 @@ def _fact(observed_at: datetime, *, pedestrian_count: int) -> PedestrianHourlyFa
     )
 
 
-def test_create_default_services_uses_empty_repositories_without_a_database_url() -> None:
+def test_create_default_services_uses_empty_repositories_without_a_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbid_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("blank database configuration must not perform I/O")
+
+    monkeypatch.setattr(app_module, "create_database_engine", forbid_call)
+    monkeypatch.setattr(app_module, "create_session_factory", forbid_call)
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", forbid_call)
+
     missing_url_services = app_module.create_default_services(environ={})
     whitespace_url_services = app_module.create_default_services(
         environ={DATABASE_URL_ENV_VAR: " \t "}
@@ -125,6 +136,7 @@ def test_create_default_services_uses_empty_repositories_without_a_database_url(
     for services in (missing_url_services, whitespace_url_services):
         assert isinstance(services.sensor_repository, EmptySensorRepository)
         assert isinstance(services.history_repository, EmptyHistoryRepository)
+        assert services.model_provider is None
 
 
 def test_create_default_services_builds_one_shared_postgres_repository_lazily(
@@ -148,8 +160,12 @@ def test_create_default_services_builds_one_shared_postgres_repository_lazily(
         session_factory_engines.append(received_engine)
         return session_factory
 
+    def forbid_artifact_load(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("database-only configuration must not load an artifact")
+
     monkeypatch.setattr(app_module, "create_database_engine", fake_create_database_engine)
     monkeypatch.setattr(app_module, "create_session_factory", fake_create_session_factory)
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", forbid_artifact_load)
 
     services = app_module.create_default_services(
         environ={DATABASE_URL_ENV_VAR: "  postgresql+psycopg://user:pass@db/urbanflow  "}
@@ -159,7 +175,108 @@ def test_create_default_services_builds_one_shared_postgres_repository_lazily(
     assert session_factory_engines == [engine]
     assert isinstance(services.sensor_repository, PostgresSensorHistoryRepository)
     assert services.sensor_repository is services.history_repository
+    assert services.model_provider is None
     assert not session_factory_called
+
+
+def test_create_default_services_ignores_artifact_without_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbid_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("artifact-only configuration must not perform I/O")
+
+    monkeypatch.setattr(app_module, "create_database_engine", forbid_call)
+    monkeypatch.setattr(app_module, "create_session_factory", forbid_call)
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", forbid_call)
+
+    services = app_module.create_default_services(
+        environ={app_module.MODEL_ARTIFACT_PATH_ENV_VAR: "C:/models/lightgbm"}
+    )
+
+    assert isinstance(services.sensor_repository, EmptySensorRepository)
+    assert isinstance(services.history_repository, EmptyHistoryRepository)
+    assert services.model_provider is None
+
+
+def test_create_default_services_wires_artifact_provider_for_complete_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = object()
+    session_factory = object()
+    artifact = object()
+    loaded_paths: list[str] = []
+    monkeypatch.setattr(app_module, "create_database_engine", lambda _url: engine)
+    monkeypatch.setattr(app_module, "create_session_factory", lambda _engine: session_factory)
+
+    def fake_load_lightgbm_artifact(path: str) -> object:
+        loaded_paths.append(path)
+        return artifact
+
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", fake_load_lightgbm_artifact)
+
+    services = app_module.create_default_services(
+        environ={
+            DATABASE_URL_ENV_VAR: "  postgresql+psycopg://user:pass@db/urbanflow  ",
+            app_module.MODEL_ARTIFACT_PATH_ENV_VAR: "  C:/models/lightgbm  ",
+        }
+    )
+
+    assert loaded_paths == ["C:/models/lightgbm"]
+    assert isinstance(services.sensor_repository, PostgresSensorHistoryRepository)
+    assert services.sensor_repository is services.history_repository
+    assert isinstance(services.model_provider, ArtifactBackedLightGBMForecastProvider)
+    assert services.model_provider._artifact is artifact
+    assert services.model_provider._history_repository is services.history_repository
+
+
+def test_invalid_artifact_degrades_forecast_without_disabling_postgres_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_sensor = _sensor(999001, status="A")
+    session_factory = StatementAwareSessionFactory(
+        active_sensors=[active_sensor],
+        inactive_sensors=[],
+        facts=[],
+    )
+    monkeypatch.setattr(app_module, "create_database_engine", lambda _url: object())
+    monkeypatch.setattr(
+        app_module,
+        "create_session_factory",
+        lambda _engine: session_factory,
+    )
+
+    def fail_artifact_load(path: str) -> None:
+        assert path == "https://example.com/model"
+        raise LightGBMArtifactError("artifact location must be a local path")
+
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", fail_artifact_load)
+
+    application = app_module.create_app(
+        services=app_module.create_default_services(
+            environ={
+                DATABASE_URL_ENV_VAR: "postgresql+psycopg://user:pass@db/urbanflow",
+                app_module.MODEL_ARTIFACT_PATH_ENV_VAR: " https://example.com/model ",
+            }
+        )
+    )
+
+    sensors = api_get(application, "/api/v1/sensors")
+    forecast = api_get(
+        application,
+        "/api/v1/sensors/999001/forecast",
+        params={"horizon": 1},
+    )
+
+    assert sensors.status_code == 200
+    assert [row["location_id"] for row in sensors.json()["data"]] == [999001]
+    assert forecast.status_code == 503
+    assert forecast.json() == {
+        "error": {
+            "code": "model_unavailable",
+            "message": "No forecast model is configured for serving.",
+            "details": [],
+        }
+    }
 
 
 def test_default_app_reads_sensor_and_history_data_through_postgres_repository(
@@ -210,9 +327,21 @@ def test_default_app_reads_sensor_and_history_data_through_postgres_repository(
     assert all(session.closed for session in session_factory.sessions)
 
 
-def test_create_default_services_rejects_an_invalid_database_url() -> None:
+def test_create_default_services_rejects_an_invalid_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbid_artifact_load(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid database configuration must fail before artifact loading")
+
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", forbid_artifact_load)
+
     with pytest.raises(DatabaseConfigError, match=f"Invalid {DATABASE_URL_ENV_VAR} configuration"):
-        app_module.create_default_services(environ={DATABASE_URL_ENV_VAR: "not-a-sqlalchemy-url"})
+        app_module.create_default_services(
+            environ={
+                DATABASE_URL_ENV_VAR: "not-a-sqlalchemy-url",
+                app_module.MODEL_ARTIFACT_PATH_ENV_VAR: "C:/models/lightgbm",
+            }
+        )
 
 
 def test_default_app_maps_lazy_database_read_failures_to_a_project_error(
@@ -245,11 +374,19 @@ def test_default_app_maps_lazy_database_read_failures_to_a_project_error(
     assert response.json()["error"]["code"] == "data_store_unavailable"
 
 
-def test_explicit_services_bypass_default_database_configuration(
+def test_explicit_services_bypass_default_environment_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     injected_services = ApiServices()
     monkeypatch.setenv(DATABASE_URL_ENV_VAR, "not-a-sqlalchemy-url")
+    monkeypatch.setenv(app_module.MODEL_ARTIFACT_PATH_ENV_VAR, "https://example.com/model")
+
+    def forbid_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("injected services must bypass environment construction")
+
+    monkeypatch.setattr(app_module, "create_database_engine", forbid_call)
+    monkeypatch.setattr(app_module, "create_session_factory", forbid_call)
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", forbid_call)
 
     application = app_module.create_app(services=injected_services)
 

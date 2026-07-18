@@ -6,11 +6,15 @@ from sqlalchemy.exc import ArgumentError
 
 from urbanflow import __version__
 from urbanflow.api.errors import UrbanFlowApiError, urbanflow_api_error_handler
+from urbanflow.api.lightgbm_provider import ArtifactBackedLightGBMForecastProvider
 from urbanflow.api.postgres import PostgresSensorHistoryRepository
 from urbanflow.api.routers import router as api_router
-from urbanflow.api.services import ApiServices
+from urbanflow.api.services import ApiServices, ForecastModelProvider
 from urbanflow.database.config import DATABASE_URL_ENV_VAR, DatabaseConfigError
 from urbanflow.database.engine import create_database_engine, create_session_factory
+from urbanflow.modeling.lightgbm_artifact import LightGBMArtifactError, load_lightgbm_artifact
+
+MODEL_ARTIFACT_PATH_ENV_VAR = "URBANFLOW_API_MODEL_ARTIFACT_PATH"
 
 
 def create_default_services(
@@ -27,9 +31,22 @@ def create_default_services(
         raise DatabaseConfigError(f"Invalid {DATABASE_URL_ENV_VAR} configuration.") from exc
     session_factory = create_session_factory(engine)
     repository = PostgresSensorHistoryRepository(session_factory)
+    configured_artifact_path = values.get(MODEL_ARTIFACT_PATH_ENV_VAR)
+    model_provider: ForecastModelProvider | None = None
+    if configured_artifact_path is not None and configured_artifact_path.strip():
+        try:
+            artifact = load_lightgbm_artifact(configured_artifact_path.strip())
+        except LightGBMArtifactError:
+            model_provider = None
+        else:
+            model_provider = ArtifactBackedLightGBMForecastProvider(
+                artifact=artifact,
+                history_repository=repository,
+            )
     return ApiServices(
         sensor_repository=repository,
         history_repository=repository,
+        model_provider=model_provider,
     )
 
 
