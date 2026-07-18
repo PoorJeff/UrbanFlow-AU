@@ -140,8 +140,6 @@ class ArtifactBackedLightGBMForecastProvider:
         )
 
         predicted_values = tuple(float(value) for value in self._artifact.model.predict(rows))
-        if len(predicted_values) != horizon:
-            raise ForecastInputUnavailableError("model returned an invalid prediction count")
         predictions = tuple(
             ForecastPrediction(
                 forecast_horizon=int(row.forecast_horizon),
@@ -151,7 +149,7 @@ class ArtifactBackedLightGBMForecastProvider:
             for row, predicted_count in zip(
                 rows.itertuples(index=False),
                 predicted_values,
-                strict=True,
+                strict=False,
             )
         )
         return ForecastBatch(

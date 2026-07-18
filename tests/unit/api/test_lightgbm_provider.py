@@ -11,10 +11,13 @@ import pandas as pd
 import pytest
 
 import urbanflow.api.lightgbm_provider as lightgbm_provider_module
+from tests.unit.api.helpers import InMemorySensorRepository, make_sensor
+from urbanflow.api.errors import UrbanFlowApiError
 from urbanflow.api.lightgbm_provider import ArtifactBackedLightGBMForecastProvider
 from urbanflow.api.services import (
     DataStoreUnavailableError,
     ForecastInputUnavailableError,
+    ForecastService,
     HistoryRecord,
 )
 from urbanflow.database.time import MELBOURNE_TZ
@@ -444,3 +447,22 @@ def test_data_store_failure_propagates_unchanged() -> None:
 
     assert caught.value is error
     assert repository.calls == [(101, 168)]
+
+
+def test_short_model_output_remains_a_model_unavailable_error() -> None:
+    model = RecordingModel(predictions=(1.0,))
+    provider = ArtifactBackedLightGBMForecastProvider(
+        artifact=_recording_artifact(model),
+        history_repository=RecordingRecentHistoryRepository(records=_history()),
+    )
+    service = ForecastService(
+        sensor_repository=InMemorySensorRepository(records=[make_sensor()]),
+        model_provider=provider,
+    )
+
+    with pytest.raises(UrbanFlowApiError) as caught:
+        service.forecast(location_id=101, horizon=2)
+
+    assert caught.value.status_code == 503
+    assert caught.value.code == "model_unavailable"
+    assert len(model.calls) == 1
