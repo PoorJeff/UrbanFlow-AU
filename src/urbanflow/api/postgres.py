@@ -83,3 +83,28 @@ class PostgresSensorHistoryRepository:
                 ]
         except SQLAlchemyError as exc:
             raise DataStoreUnavailableError("sensor data is unavailable") from exc
+
+    def get_recent_history(
+        self,
+        location_id: int,
+        *,
+        limit: int,
+    ) -> list[HistoryRecord]:
+        statement = (
+            select(PedestrianHourlyFact)
+            .where(PedestrianHourlyFact.location_id == location_id)
+            .order_by(PedestrianHourlyFact.observed_at.desc())
+            .limit(limit)
+        )
+        try:
+            with self._session_factory() as session:
+                facts = session.scalars(statement).all()
+        except SQLAlchemyError as exc:
+            raise DataStoreUnavailableError("sensor data is unavailable") from exc
+        return [
+            HistoryRecord(
+                observed_at=fact.observed_at,
+                pedestrian_count=fact.pedestrian_count,
+            )
+            for fact in reversed(facts)
+        ]

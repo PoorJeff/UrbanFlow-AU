@@ -12,7 +12,11 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from urbanflow import __version__
-from urbanflow.api.errors import UrbanFlowApiError, data_store_unavailable_error
+from urbanflow.api.errors import (
+    UrbanFlowApiError,
+    data_store_unavailable_error,
+    forecast_unavailable_error,
+)
 from urbanflow.api.schemas import (
     ComponentHealth,
     FinalTestWindowResponse,
@@ -65,6 +69,15 @@ class HistoryRepository(Protocol):
     ) -> list[HistoryRecord]: ...
 
 
+class RecentHistoryRepository(Protocol):
+    def get_recent_history(
+        self,
+        location_id: int,
+        *,
+        limit: int,
+    ) -> list[HistoryRecord]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ForecastPrediction:
     forecast_horizon: int
@@ -92,6 +105,10 @@ class ModelMetadataProvider(Protocol):
 
 class DataStoreUnavailableError(RuntimeError):
     """Raised by a configured API repository when its backing store cannot be read."""
+
+
+class ForecastInputUnavailableError(RuntimeError):
+    """Raised when serving inputs cannot satisfy the forecast contract."""
 
 
 class MetricsUnavailableError(RuntimeError):
@@ -176,7 +193,12 @@ class ForecastService:
                 message="No forecast model is configured for serving.",
             )
         _ensure_sensor_exists(self.sensor_repository, location_id)
-        batch = self.model_provider.predict(location_id, horizon)
+        try:
+            batch = self.model_provider.predict(location_id, horizon)
+        except DataStoreUnavailableError as exc:
+            raise data_store_unavailable_error() from exc
+        except ForecastInputUnavailableError as exc:
+            raise forecast_unavailable_error() from exc
         _validate_forecast_horizons(batch=batch, horizon=horizon)
         return ForecastBatch(
             model_name=batch.model_name,

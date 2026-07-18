@@ -30,6 +30,14 @@ def data_store_unavailable_error() -> UrbanFlowApiError:
     )
 
 
+def forecast_unavailable_error() -> UrbanFlowApiError:
+    return UrbanFlowApiError(
+        status_code=503,
+        code="forecast_unavailable",
+        message="Forecast cannot be generated from the available serving inputs.",
+    )
+
+
 def metrics_unavailable_error() -> UrbanFlowApiError:
     return UrbanFlowApiError(
         status_code=503,

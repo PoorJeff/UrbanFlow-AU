@@ -7,7 +7,9 @@ from tests.unit.api.helpers import InMemorySensorRepository, api_get, make_senso
 from urbanflow.api.app import create_app
 from urbanflow.api.services import (
     ApiServices,
+    DataStoreUnavailableError,
     ForecastBatch,
+    ForecastInputUnavailableError,
     ForecastPrediction,
     SensorRecord,
 )
@@ -29,6 +31,16 @@ class RecordingForecastProvider:
     def predict(self, location_id: int, horizon: int) -> ForecastBatch:
         self.calls.append((location_id, horizon))
         return self.batch
+
+
+class UnavailableHistoryProvider:
+    def predict(self, location_id: int, horizon: int) -> ForecastBatch:
+        raise DataStoreUnavailableError("database unavailable")
+
+
+class InvalidServingInputProvider:
+    def predict(self, location_id: int, horizon: int) -> ForecastBatch:
+        raise ForecastInputUnavailableError("missing contiguous history")
 
 
 def forecast_batch(horizon: int) -> ForecastBatch:
@@ -126,6 +138,50 @@ def test_forecast_returns_sensor_not_found_when_a_provider_is_configured() -> No
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "sensor_not_found"
     assert provider.calls == []
+
+
+def test_forecast_maps_provider_data_store_failure() -> None:
+    services = ApiServices(
+        sensor_repository=InMemorySensorRepository(records=[make_sensor()]),
+        model_provider=UnavailableHistoryProvider(),
+    )
+
+    response = api_get(
+        create_app(services=services),
+        "/api/v1/sensors/101/forecast",
+        params={"horizon": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "data_store_unavailable",
+            "message": "Sensor data is currently unavailable.",
+            "details": [],
+        }
+    }
+
+
+def test_forecast_maps_invalid_serving_inputs() -> None:
+    services = ApiServices(
+        sensor_repository=InMemorySensorRepository(records=[make_sensor()]),
+        model_provider=InvalidServingInputProvider(),
+    )
+
+    response = api_get(
+        create_app(services=services),
+        "/api/v1/sensors/101/forecast",
+        params={"horizon": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "forecast_unavailable",
+            "message": "Forecast cannot be generated from the available serving inputs.",
+            "details": [],
+        }
+    }
 
 
 def test_forecast_orders_rows_clips_counts_and_preserves_provider_metadata() -> None:

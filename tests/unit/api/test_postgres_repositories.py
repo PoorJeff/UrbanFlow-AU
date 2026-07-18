@@ -212,6 +212,24 @@ def test_get_history_orders_aware_rows_and_compiles_half_open_range_query() -> N
     assert session.closed
 
 
+def test_get_recent_history_queries_newest_rows_and_returns_them_ascending() -> None:
+    earlier = _fact(datetime(2026, 7, 2, 1, tzinfo=UTC), pedestrian_count=10)
+    later = _fact(datetime(2026, 7, 2, 2, tzinfo=UTC), pedestrian_count=25)
+    session = FakeSession([later, earlier])
+
+    records = _repository(session).get_recent_history(101, limit=168)
+
+    assert [record.observed_at for record in records] == [
+        earlier.observed_at,
+        later.observed_at,
+    ]
+    sql = _compile(session.statements[0])
+    assert "pedestrian_hourly_fact.location_id = 101" in sql
+    assert "ORDER BY pedestrian_hourly_fact.observed_at DESC" in sql
+    assert "LIMIT 168" in sql
+    assert session.closed
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -227,6 +245,10 @@ def test_get_history_orders_aware_rows_and_compiles_half_open_range_query() -> N
                 datetime(2026, 7, 3, 0, tzinfo=UTC),
             ),
             id="get_history",
+        ),
+        pytest.param(
+            lambda repository: repository.get_recent_history(101, limit=168),
+            id="get_recent_history",
         ),
     ],
 )
@@ -256,6 +278,10 @@ def test_public_methods_translate_session_factory_failures(call: RepositoryCall)
             ),
             id="get_history",
         ),
+        pytest.param(
+            lambda repository: repository.get_recent_history(101, limit=168),
+            id="get_recent_history",
+        ),
     ],
 )
 def test_public_methods_translate_scalars_failures(call: RepositoryCall) -> None:
@@ -281,6 +307,10 @@ def test_public_methods_translate_scalars_failures(call: RepositoryCall) -> None
                 datetime(2026, 7, 3, 0, tzinfo=UTC),
             ),
             id="get_history",
+        ),
+        pytest.param(
+            lambda repository: repository.get_recent_history(101, limit=168),
+            id="get_recent_history",
         ),
     ],
 )
