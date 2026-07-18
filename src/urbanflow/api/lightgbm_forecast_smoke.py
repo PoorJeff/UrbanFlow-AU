@@ -93,6 +93,9 @@ def run_lightgbm_forecast_smoke(
                 temporary_directory = Path(directory)
                 source_timestamps, observations = _smoke_observations()
                 calendar = _smoke_holiday_calendar(source_timestamps)
+                calendar_path = temporary_directory / "holiday_calendar.json"
+                _write_smoke_holiday_calendar(calendar_path, calendar)
+                calendar = HolidayCalendar.from_json_file(calendar_path)
                 supervised_csv_path = temporary_directory / "supervised.csv"
                 build_supervised_frame(
                     observations,
@@ -223,6 +226,23 @@ def _smoke_holiday_calendar(timestamps: pd.DatetimeIndex) -> HolidayCalendar:
         coverage_start=timestamps[0].date(),
         coverage_end=final_target.date(),
         public_holidays=(date(2026, 7, 6),),
+    )
+
+
+def _write_smoke_holiday_calendar(path: Path, calendar: HolidayCalendar) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "coverage_start": calendar.coverage_start.isoformat(),
+                "coverage_end": calendar.coverage_end.isoformat(),
+                "public_holidays": [
+                    public_holiday.isoformat() for public_holiday in calendar.public_holidays
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 

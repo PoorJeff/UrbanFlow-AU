@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 
 from urbanflow.api import lightgbm_forecast_smoke
-from urbanflow.modeling.lightgbm_artifact import LightGBMArtifactError
+from urbanflow.modeling.lightgbm_artifact import HolidayCalendar, LightGBMArtifactError
 
 
 def test_validate_smoke_schema_name_accepts_generated_lowercase_name() -> None:
@@ -69,6 +70,24 @@ def test_lightgbm_forecast_smoke_result_is_json_safe() -> None:
     encoded = json.dumps(asdict(result), sort_keys=True)
 
     assert json.loads(encoded)["data_cutoff_at"] == cutoff
+
+
+def test_smoke_holiday_calendar_is_written_and_reloaded(tmp_path: Path) -> None:
+    calendar = HolidayCalendar(
+        coverage_start=date(2026, 7, 1),
+        coverage_end=date(2026, 7, 9),
+        public_holidays=(date(2026, 7, 6),),
+    )
+    calendar_path = tmp_path / "holiday_calendar.json"
+
+    lightgbm_forecast_smoke._write_smoke_holiday_calendar(calendar_path, calendar)
+
+    assert json.loads(calendar_path.read_text(encoding="utf-8")) == {
+        "coverage_start": "2026-07-01",
+        "coverage_end": "2026-07-09",
+        "public_holidays": ["2026-07-06"],
+    }
+    assert HolidayCalendar.from_json_file(calendar_path) == calendar
 
 
 def test_lightgbm_forecast_smoke_cli_returns_one_for_artifact_errors(
