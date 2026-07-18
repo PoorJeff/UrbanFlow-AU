@@ -319,7 +319,7 @@ class LightGBMArtifactCliError(ValueError): ...
 def build_parser() -> argparse.ArgumentParser: ...
 def run_artifact_export(
     supervised_csv: Path,
-    output_directory: Path,
+    output_directory: str | Path,
     *,
     holiday_calendar_path: Path,
     model_config: LightGBMModelConfig,
@@ -347,7 +347,7 @@ def test_cli_returns_two_for_invalid_operator_input(tmp_path: Path, capsys: pyte
     assert "error:" in capsys.readouterr().err
 ~~~
 
-Also cover a zero n-estimators, non-positive learning rate, malformed calendar, existing destination, and a monkeypatched joblib.dump that raises OSError. The last case must return 1 rather than 2. Assert no test uses a network, a database URL, MLflow, or a committed models directory.
+Also cover a zero n-estimators, non-positive learning rate, malformed calendar, existing destination, an opaque URI-like output such as s3:bucket/artifact, and a monkeypatched joblib.dump that raises OSError. The invalid output path must return 2 and create no artifact. The dump failure must return 1 rather than 2. Assert no test uses a network, a database URL, MLflow, or a committed models directory.
 
 - [ ] **Step 2: Run the focused CLI test and confirm RED**
 
@@ -371,6 +371,8 @@ parser.add_argument("--num-leaves", type=int, default=31)
 parser.add_argument("--min-child-samples", type=int, default=20)
 parser.add_argument("--evaluation-summary-path", default=None)
 ~~~
+
+Keep output_directory as argparse's raw string (do not give that positional a Path type) so export_lightgbm_artifact can apply its shared raw-URI validator before any Path conversion. The supervised CSV and holiday-calendar inputs may be converted to Path locally after parsing.
 
 Reuse the existing positive integer/float validation rules from the evaluation CLI. run_artifact_export must read the CSV once, calculate its raw-byte hash from the same path, parse the holiday calendar, construct LightGBMModelConfig with those four CLI tunables, and call export_lightgbm_artifact. main prints json.dumps of a JSON-safe manifest summary with sort_keys=True and returns:
 
