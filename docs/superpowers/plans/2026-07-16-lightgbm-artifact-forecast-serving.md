@@ -22,6 +22,7 @@
 - Recent history is exactly 168 ascending records, timezone-aware, on UTC-hour boundaries, separated by one UTC hour, and has finite non-negative integral counts. Reject bool, float, negative, duplicate, gapped, naive, and non-hour values.
 - Convert validated history instants to the named Australia/Melbourne timezone before feature generation. This preserves local calendar features across PostgreSQL UTC round trips and daylight-saving transitions.
 - A provider horizon is a non-boolean Integral in 1 through 24, validated before any repository or model call. Advance forecast target instants in UTC and then convert them to Australia/Melbourne; never use local wall-clock datetime addition across a daylight-saving transition.
+- Serving-input failures map to forecast_unavailable, while malformed provider/model output (wrong count or values that cannot become floats) maps to model_unavailable. Do not silently truncate extra model outputs or fabricate a forecast row for them.
 - Keep direct multi-horizon semantics: generate all requested horizons from one observed cutoff. Never write a prediction into history or use recursive predictions as lag values.
 - Do not change health behavior, routes, Pydantic response models, migrations, ingestion, weather fetching, MLflow registry behavior, Dashboard, Evidently, or Docker Compose.
 - With no database URL or a blank URL, do not create an Engine, open a session, read an artifact, or contact any remote service. With a database but no valid artifact, sensor/history reads remain usable and forecast remains the existing 503 model_unavailable.
@@ -587,7 +588,10 @@ git commit -m "feat(api): add forecast history boundary"
 **Files:**
 
 - Create: src/urbanflow/api/lightgbm_provider.py
+- Modify: src/urbanflow/api/services.py
+- Modify: src/urbanflow/api/errors.py
 - Create: tests/unit/api/test_lightgbm_provider.py
+- Modify: tests/unit/api/test_forecasts.py
 
 **Interfaces:**
 
@@ -607,6 +611,8 @@ class ArtifactBackedLightGBMForecastProvider:
 
     def predict(self, location_id: int, horizon: int) -> ForecastBatch: ...
 ~~~
+
+- Define `ForecastModelOutputError` beside the existing provider-facing service exceptions. `ForecastService` catches it only around `model_provider.predict(...)` and maps it through a new error helper to `503 model_unavailable` with message `"Forecast provider returned an invalid prediction batch."`.
 
 - The provider does not perform artifact I/O. Task 5 supplies an already validated LoadedLightGBMArtifact at startup.
 
@@ -648,7 +654,7 @@ Use a small recording model only in the feature-semantics test. Its predict meth
 
 Parameterize failure tests for 167 records, 169 records, reverse order, an exact one-hour gap, a naive timestamp, a minute=30 timestamp, a bool count, a float count, a negative count, and a calendar that does not cover the target day. Each must raise ForecastInputUnavailableError before model.predict is called. Separately cover True, 0, 25, and a non-integral horizon; each must fail before either repository or model is called. A repository DataStoreUnavailableError must propagate unchanged for ForecastService to map in Task 3.
 
-Use a recording model that returns fewer prediction values than requested and call the provider through ForecastService with an existing sensor. The provider must not relabel this malformed model output as ForecastInputUnavailableError; the resulting incomplete ForecastBatch must reach the existing service validation and produce `503 model_unavailable`.
+Use recording models that return fewer and more prediction values than requested, plus values that cannot be converted to float. Call the provider through ForecastService with an existing sensor. None may become ForecastInputUnavailableError, be silently truncated, or fabricate a row; each must produce the exact `503 model_unavailable` code. Add the direct ForecastService error-envelope regression in test_forecasts.py for ForecastModelOutputError.
 
 - [ ] **Step 2: Run the focused provider test and confirm RED**
 
@@ -738,7 +744,7 @@ if rows["forecast_horizon"].tolist() != list(range(1, horizon + 1)):
     raise ForecastInputUnavailableError("could not construct direct forecast rows")
 ~~~
 
-predict validates horizon first, then obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Do not classify a short or non-finite model output as ForecastInputUnavailableError: materialize a possibly incomplete batch without strict zip semantics so ForecastService's existing provider-output checks retain the `model_unavailable` contract. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
+predict validates horizon first, then obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Convert outputs to floats; if conversion fails or their count differs from the selected rows in either direction, raise ForecastModelOutputError. ForecastService maps that exception to the specified `model_unavailable` response; do not use ForecastInputUnavailableError, silently truncate output, or fabricate a row. Non-finite float values may reach the existing service-level finite-value validation. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
 
 - [ ] **Step 4: Run focused verification**
 
@@ -755,7 +761,7 @@ Expected: real temporary artifact predictions form one direct batch; invalid run
 - [ ] **Step 5: Commit the provider task**
 
 ~~~powershell
-git add src/urbanflow/api/lightgbm_provider.py tests/unit/api/test_lightgbm_provider.py
+git add src/urbanflow/api/lightgbm_provider.py src/urbanflow/api/services.py src/urbanflow/api/errors.py tests/unit/api/test_lightgbm_provider.py tests/unit/api/test_forecasts.py
 git commit -m "feat(api): add lightgbm artifact forecast provider"
 ~~~
 

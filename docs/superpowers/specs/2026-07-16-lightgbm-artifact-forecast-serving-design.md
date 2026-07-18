@@ -279,10 +279,14 @@ feature construction, it verifies that each resulting Melbourne-local target
 date is within the manifest calendar coverage; a manifest cannot silently
 classify an uncovered future date as non-holiday.
 
-Malformed model output is not a serving-input failure. If a provider returns
-an incomplete or non-finite batch, the existing service-level provider-output
-validation retains the `503 model_unavailable` response; the provider must not
-relabel that condition as `forecast_unavailable`.
+Malformed model output is not a serving-input failure. A provider must reject
+both short and overlong output, and values that cannot become floats, without
+silently truncating output or fabricating a prediction row. Its dedicated
+model-output error maps at the service boundary to `503 model_unavailable` with
+message `"Forecast provider returned an invalid prediction batch."`. Finite-
+value validation of an otherwise well-shaped batch remains at the existing
+service boundary. None of these conditions may be relabeled as
+`forecast_unavailable`.
 
 `generated_at` is the UTC request-time timestamp. `model_name` is
 `"lightgbm"`; `model_version` comes from the validated manifest and is never
@@ -314,7 +318,7 @@ At request time:
 | unknown sensor with a usable provider | existing `404 sensor_not_found` |
 | PostgreSQL session/query failure | existing `503 data_store_unavailable` |
 | fewer than 168 rows, a gap, invalid timestamp/count, or uncovered future holiday date | new `503 forecast_unavailable` with message `"Forecast cannot be generated from the available serving inputs."` |
-| provider returns an incomplete/non-finite batch | existing `503 model_unavailable` |
+| provider returns malformed, incomplete, or non-finite output | existing `503 model_unavailable` |
 
 `ForecastService` catches `DataStoreUnavailableError` raised from provider
 history reads and maps it to the existing data-store response. It catches a
