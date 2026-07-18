@@ -271,9 +271,13 @@ the existing direct multi-horizon rule remains intact: all lag and rolling
 features are anchored to observed history at the cutoff, while calendar values
 describe each known future target timestamp. Weather columns retain the current
 explicitly-missing values and markers; this slice does not add weather data.
-Before feature construction, it verifies that each requested target date is
-within the manifest calendar coverage; a manifest cannot silently classify an
-uncovered future date as non-holiday.
+Before any history read, it rejects a boolean, non-integral, or out-of-range
+(`1..24`) horizon. Forecast targets advance from the cutoff as UTC instants and
+are then converted to `Australia/Melbourne`; local wall-clock `datetime +
+timedelta` arithmetic is not used across daylight-saving changes. Before
+feature construction, it verifies that each resulting Melbourne-local target
+date is within the manifest calendar coverage; a manifest cannot silently
+classify an uncovered future date as non-holiday.
 
 `generated_at` is the UTC request-time timestamp. `model_name` is
 `"lightgbm"`; `model_version` comes from the validated manifest and is never
@@ -330,11 +334,13 @@ Routine tests remain fully offline and PostgreSQL-free.
 2. Provider tests inject an in-memory recent-history repository and a loaded
    temporary artifact. They prove all direct horizons are returned in order,
    cutoff and target timestamps are correct, no row after the cutoff affects
-   features, and predictions are non-negative at the API boundary.
+   features, predictions are non-negative at the API boundary, and targets
+   crossing a Melbourne daylight-saving transition remain one-hour UTC
+   instants.
 3. Provider failure tests cover exactly 167 rows, an hourly gap, a naive or
-   non-hour timestamp, a negative/non-integer count, calendar coverage expiry,
-   repository failures, and a Melbourne daylight-saving transition supplied in
-   UTC timestamps.
+   non-hour timestamp, a negative/non-integer count, an invalid horizon,
+   calendar coverage expiry, repository failures, and a Melbourne daylight-
+   saving transition supplied in UTC timestamps.
 4. PostgreSQL adapter tests compile the recent-history statement and prove its
    location predicate, descending limit query, ascending returned records, and
    error translation.

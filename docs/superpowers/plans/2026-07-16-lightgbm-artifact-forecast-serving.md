@@ -21,6 +21,7 @@
 - There is no weather source in this slice. Refuse an artifact training frame when any eligible row contains observed temperature, rainfall, or wind_speed data, or when its corresponding missing marker is not true. Runtime uses the existing all-missing weather feature contract.
 - Recent history is exactly 168 ascending records, timezone-aware, on UTC-hour boundaries, separated by one UTC hour, and has finite non-negative integral counts. Reject bool, float, negative, duplicate, gapped, naive, and non-hour values.
 - Convert validated history instants to the named Australia/Melbourne timezone before feature generation. This preserves local calendar features across PostgreSQL UTC round trips and daylight-saving transitions.
+- A provider horizon is a non-boolean Integral in 1 through 24, validated before any repository or model call. Advance forecast target instants in UTC and then convert them to Australia/Melbourne; never use local wall-clock datetime addition across a daylight-saving transition.
 - Keep direct multi-horizon semantics: generate all requested horizons from one observed cutoff. Never write a prediction into history or use recursive predictions as lag values.
 - Do not change health behavior, routes, Pydantic response models, migrations, ingestion, weather fetching, MLflow registry behavior, Dashboard, Evidently, or Docker Compose.
 - With no database URL or a blank URL, do not create an Engine, open a session, read an artifact, or contact any remote service. With a database but no valid artifact, sensor/history reads remain usable and forecast remains the existing 503 model_unavailable.
@@ -628,7 +629,9 @@ assert batch.data_cutoff_at == history[-1].observed_at.astimezone(MELBOURNE_TZ)
 assert batch.forecast_origin_at == batch.data_cutoff_at
 assert [item.forecast_horizon for item in batch.predictions] == list(range(1, 25))
 assert [item.target_at for item in batch.predictions] == [
-    batch.data_cutoff_at + timedelta(hours=step)
+    (batch.data_cutoff_at.astimezone(UTC) + timedelta(hours=step)).astimezone(
+        MELBOURNE_TZ
+    )
     for step in range(1, 25)
 ]
 ~~~
@@ -641,8 +644,9 @@ Use a small recording model only in the feature-semantics test. Its predict meth
 4. all weather columns are missing and their markers are true;
 5. no predicted value was appended to the input history;
 6. the provider normalizes a UTC record sequence crossing a Melbourne daylight-saving boundary to MELBOURNE_TZ while maintaining one-hour instant gaps.
+7. target_at and holiday-calendar coverage advance by UTC instants through that daylight-saving transition, rather than by local wall-clock datetime addition.
 
-Parameterize failure tests for 167 records, 169 records, reverse order, an exact one-hour gap, a naive timestamp, a minute=30 timestamp, a bool count, a float count, a negative count, and a calendar that does not cover the target day. Each must raise ForecastInputUnavailableError before model.predict is called. A repository DataStoreUnavailableError must propagate unchanged for ForecastService to map in Task 3.
+Parameterize failure tests for 167 records, 169 records, reverse order, an exact one-hour gap, a naive timestamp, a minute=30 timestamp, a bool count, a float count, a negative count, and a calendar that does not cover the target day. Each must raise ForecastInputUnavailableError before model.predict is called. Separately cover True, 0, 25, and a non-integral horizon; each must fail before either repository or model is called. A repository DataStoreUnavailableError must propagate unchanged for ForecastService to map in Task 3.
 
 - [ ] **Step 2: Run the focused provider test and confirm RED**
 
@@ -679,6 +683,18 @@ def _forecast_rows(
 ) -> pd.DataFrame: ...
 ~~~
 
+_validate_horizon must reject a bool, a non-Integral value, or a value outside 1 through 24 with ForecastInputUnavailableError. It is called before the repository read:
+
+~~~python
+if (
+    isinstance(horizon, bool)
+    or not isinstance(horizon, Integral)
+    or horizon < 1
+    or horizon > 24
+):
+    raise ForecastInputUnavailableError("forecast horizon is invalid")
+~~~
+
 _history_to_observations must require len(records) == RECENT_HISTORY_LIMIT. For each record:
 
 ~~~python
@@ -695,7 +711,17 @@ if isinstance(count, bool) or not isinstance(count, Integral) or count < 0:
 
 Store each accepted instant as instant.astimezone(MELBOURNE_TZ), preserving both the source instant and Melbourne-local feature semantics. Build a DataFrame containing only location_id, observed_at, and pedestrian_count; do not insert weather values or forecast targets.
 
-_validate_target_calendar checks dates for cutoff + 1 hour through cutoff + horizon hours. _forecast_rows calls:
+_validate_target_calendar checks each local date reached by advancing the cutoff's UTC instant one hour at a time, then converting to MELBOURNE_TZ. It must not use `cutoff + timedelta(...)`, whose wall-clock semantics can skip a real instant at a daylight-saving fallback:
+
+~~~python
+target_at = (
+    cutoff.astimezone(UTC) + timedelta(hours=step)
+).astimezone(MELBOURNE_TZ)
+if not calendar.contains(target_at.date()):
+    raise ForecastInputUnavailableError("holiday calendar does not cover target date")
+~~~
+
+_forecast_rows calls:
 
 ~~~python
 supervised = build_supervised_frame(
@@ -710,7 +736,7 @@ if rows["forecast_horizon"].tolist() != list(range(1, horizon + 1)):
     raise ForecastInputUnavailableError("could not construct direct forecast rows")
 ~~~
 
-predict obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
+predict validates horizon first, then obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
 
 - [ ] **Step 4: Run focused verification**
 
