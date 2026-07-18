@@ -5,8 +5,8 @@ UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand 
 > **Project status:** foundation, local-baseline, and first FastAPI serving
 > boundary stage. Local ingestion, persistence, feature-building, baseline
 > evaluation, reporting, MLflow tracking, and typed API reads are in place.
-> PostgreSQL-backed sensor and history reads are opt-in; model artifacts and
-> production forecasting performance claims are not yet in place.
+> PostgreSQL-backed reads and trusted local LightGBM artifact forecasts are
+> opt-in; production forecasting performance claims are not in place.
 
 ## Requirements
 
@@ -56,13 +56,15 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/history?start=2026-0
 Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/forecast?horizon=24"
 ```
 
-This is an honest API serving boundary, not production forecasting. The default
-process does not connect to PostgreSQL or Melbourne Open Data, so the sensor
-catalog is empty and default history requests return `404 sensor_not_found`.
+This is an honest local API serving boundary, not production forecasting. The
+default process does not connect to PostgreSQL or Melbourne Open Data, so the
+sensor catalog is empty and default history requests return
+`404 sensor_not_found`. A missing or blank `URBANFLOW_DATABASE_URL` also means
+that no SQLAlchemy Engine is created and no model artifact is read.
+
 Set `URBANFLOW_DATABASE_URL` explicitly to serve persisted sensor and history
-rows through the PostgreSQL read adapter; a missing or blank URL intentionally
-keeps the empty/default behavior. The database must already have the project's
-migrations and persisted data.
+rows through the PostgreSQL read adapter. The database must already have the
+project's migrations and persisted data.
 
 For example, start Uvicorn in one PowerShell window:
 
@@ -71,8 +73,9 @@ $env:URBANFLOW_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhos
 python -m uvicorn urbanflow.api.app:app --reload
 ```
 
-Then, in another PowerShell window, read active sensors and a bounded history
-range for one returned sensor:
+With only the database configured, sensor and history reads work, but forecast
+requests return `503 model_unavailable`. In another PowerShell window, read
+active sensors and a bounded history range for one returned sensor:
 
 ```powershell
 $activeSensors = Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors?active_only=true"
@@ -80,10 +83,69 @@ $locationId = $activeSensors.data[0].location_id
 Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/$locationId/history?start=2026-07-01T00:00:00Z&end=2026-07-02T00:00:00Z"
 ```
 
-The process still does not load or train a forecast model: every default
-forecast request returns `503 model_unavailable` rather than a fabricated
-prediction. Model artifact loading and a real forecast provider remain future
-slices.
+Artifact-backed forecasts exist only when both `URBANFLOW_DATABASE_URL` and a
+valid, operator-controlled local `URBANFLOW_API_MODEL_ARTIFACT_PATH` are
+configured. Export a final-fit LightGBM artifact from an explicit supervised
+CSV and holiday calendar:
+
+```powershell
+python scripts/export_lightgbm_artifact.py data/modeling/supervised_rows.csv models/lightgbm/local-demo --holiday-calendar data/modeling/holiday_calendar.json
+```
+
+`models/` is ignored by Git. The destination contains exactly `model.joblib`
+and `manifest.json`; treat the complete directory as trusted local operator
+input. It is not an MLflow Registry artifact, and the API never downloads or
+registers it remotely.
+
+The holiday calendar must be a JSON object with exactly this shape:
+
+```json
+{
+  "coverage_start": "2025-01-01",
+  "coverage_end": "2026-12-31",
+  "public_holidays": ["2025-01-27", "2026-01-26"]
+}
+```
+
+Dates use ISO `YYYY-MM-DD`; coverage is inclusive, and `public_holidays` must be
+sorted, unique, and inside that range. Every requested forecast target date
+must be covered. A request outside coverage returns
+`503 forecast_unavailable`. Because this first artifact slice has no serving
+weather source, export rejects eligible training rows containing observed
+`temperature`, `rainfall`, or `wind_speed` values (or weather missing markers
+that are not true); serving uses the established all-weather-missing feature
+contract.
+
+To serve forecasts, set both variables in the same PowerShell process and start
+Uvicorn:
+
+```powershell
+$env:URBANFLOW_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
+$env:URBANFLOW_API_MODEL_ARTIFACT_PATH = ".\models\lightgbm\local-demo"
+python -m uvicorn urbanflow.api.app:app --reload
+```
+
+Then request a direct 1–24 hour forecast from another PowerShell window:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/sensors/101/forecast?horizon=24"
+```
+
+The safe configuration matrix is intentional: without a database URL the app
+creates no Engine and does not read an artifact; with a database alone, a
+missing artifact, or an invalid artifact, sensor/history reads remain available
+but forecast returns `503 model_unavailable`. Invalid current history or
+holiday-calendar coverage returns `503 forecast_unavailable`, and storage
+failure returns `503 data_store_unavailable`. No configuration fabricates a
+prediction.
+
+`scripts/smoke_test_lightgbm_forecast.py` is an opt-in integration check for a
+disposable PostgreSQL schema and temporary local artifact. It is not part of
+routine tests and requires an intentionally configured
+`URBANFLOW_SMOKE_DATABASE_URL`.
+
+This first serving slice introduces no model registry, retraining, Dashboard,
+monitoring, Docker packaging, or production-performance claim.
 
 The model-metrics route reads an existing local evaluation-summary JSON only
 when it is explicitly configured. For example, the checked-in summary below is
@@ -156,11 +218,11 @@ observations, adds calendar, lag, rolling, missing-marker, and optional weather
 columns, and evaluates a Seasonal Naive baseline through chronological split
 utilities.
 
-The feature implementation is DataFrame-first so it can be tested without
-PostgreSQL, network access, or model artifact persistence. The local Ridge and
-LightGBM baselines build on the same feature and split contracts; future slices
-can add database-backed training reads and model artifact persistence on top of
-this path.
+The feature and evaluation implementations are DataFrame-first so they can be
+tested without PostgreSQL or network access. The local Ridge and LightGBM
+baselines build on the same feature and split contracts. A separate local
+exporter can fit and persist the trusted LightGBM serving bundle described
+above; database-backed training reads remain outside this slice.
 
 ## Train a local Ridge baseline
 
@@ -230,9 +292,10 @@ A checked-in synthetic example report is available at
 [`docs/examples/modeling/lightgbm_evaluation_report.md`](docs/examples/modeling/lightgbm_evaluation_report.md).
 
 The generated LightGBM report includes exact metric tables, Mermaid metric
-charts, and a LightGBM versus Seasonal Naive comparison table. Model artifact
-persistence, feature-importance plots, and production serving remain future
-slices.
+charts, and a LightGBM versus Seasonal Naive comparison table. Feature-
+importance plots remain future work. The separate trusted local artifact
+exporter and opt-in provider do not turn these evaluation results into a
+production-serving claim.
 
 ## Track local evaluation artifacts with MLflow
 
@@ -256,8 +319,9 @@ supervised CSV. It records local evaluation evidence: run tags, parameters,
 final-test metrics, validation-window metrics with MLflow steps, the JSON
 summary under `evaluation/`, and the optional Markdown report under `reports/`.
 These runs document local baseline evidence, not production performance claims.
-Model registry workflows, Docker Compose MLflow services, and model artifact
-logging remain future slices.
+Model Registry workflows, Docker Compose MLflow services, and logging model
+artifacts into MLflow remain future slices. Those capabilities are distinct
+from the trusted local `models/` bundle used by the opt-in forecast provider.
 
 ## Validate a local raw snapshot
 
@@ -316,9 +380,9 @@ design, so routine unit tests do not require a running PostgreSQL service.
 2. Data validation, PostgreSQL persistence, and Prefect orchestration.
 3. Leakage-safe features, rolling-origin backtests, and MLflow tracking.
 4. First FastAPI serving boundary: health, opt-in PostgreSQL-backed
-   sensor/history reads, an injectable direct-forecast provider, and local
-   evaluation-summary metrics. Model artifact loading and production forecasts
-   remain future slices.
+   sensor/history reads, a trusted local artifact-backed direct-forecast
+   provider, and local evaluation-summary metrics. The slice remains explicitly
+   non-production.
 5. Streamlit operations views and Evidently monitoring.
 6. Docker Compose packaging, evaluation evidence, screenshots, and portfolio documentation.
 

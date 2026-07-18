@@ -34,3 +34,26 @@ jobs:
 
       - name: Test
         run: python -m pytest
+
+      - name: Smoke default Uvicorn health endpoint
+        run: |
+          set -eu
+          python -m uvicorn urbanflow.api.app:app --host 127.0.0.1 --port 8765 > uvicorn.log 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 80); do
+            if python -c "import json, urllib.request; body = json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=1)); assert body['status'] == 'degraded'"; then
+              ready=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat uvicorn.log
+            exit 1
+          fi

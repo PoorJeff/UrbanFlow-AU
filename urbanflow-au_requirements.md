@@ -255,9 +255,28 @@ MLflow 至少记录：
 - `GET /api/v1/model/metrics`：模型版本和测试集指标。
 
 `/health` 保持未版本化，业务路由统一位于 `/api/v1`。FastAPI 服务代码位于
-`src/urbanflow/api`。当且仅当显式配置 `URBANFLOW_DATABASE_URL` 时，传感器和历史
-人流读取可通过 PostgreSQL repository 提供；未配置或仅空白 URL 时，服务保持不连接
-数据库的空默认行为。模型产物加载和真实 forecast provider 仍须在后续切片显式接入。
+`src/urbanflow/api`。传感器和历史人流读取仅在显式配置
+`URBANFLOW_DATABASE_URL` 时通过 PostgreSQL repository 提供；未配置或仅空白
+URL 时，服务不创建 Engine，也不读取模型产物。当且仅当同时配置
+`URBANFLOW_DATABASE_URL` 与指向有效本地目录的
+`URBANFLOW_API_MODEL_ARTIFACT_PATH` 时，默认服务才启用真实的 LightGBM
+forecast provider。仅配置数据库、未配置产物或产物无效时，传感器和历史读取
+仍可用，但预测不可用。
+
+产物目录仅包含 `model.joblib` 和 `manifest.json`，属于已被 Git 忽略的、由操作者控制并
+信任的本地输入；它不是 MLflow Registry 产物，服务不远程下载或注册模型。该产物只接受
+`DEFAULT_RIDGE_FEATURE_SPEC` 的精确有序特征、`Australia/Melbourne` 时区，以及由
+`coverage_start`、`coverage_end` 和 `public_holidays` 组成的本地节假日日历，且日历覆盖
+对请求的每个目标日期都必须是包含边界的。因本切片没有 serving weather source，导出器
+会拒绝含已观测 `temperature`、`rainfall` 或 `wind_speed` 值，或对应 missing marker 不为
+true 的可训练行；运行时使用全部天气特征缺失的既定契约。预测保持直接 1–24 小时语义：
+所有 horizon 共用一个已观测截止点，不将前一步预测回填为历史滞后值。
+
+| Condition | HTTP result |
+| --- | --- |
+| no valid provider | 503 model_unavailable |
+| storage unavailable | 503 data_store_unavailable |
+| invalid current history or holiday coverage | 503 forecast_unavailable |
 
 API 要求：
 

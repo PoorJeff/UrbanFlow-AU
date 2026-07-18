@@ -143,7 +143,7 @@ def load_lightgbm_artifact(path: str | Path) -> LoadedLightGBMArtifact: ...
 
 - The existing evaluation CLI must use read_supervised_csv and convert SupervisedCsvError to its existing LightGBMEvaluationCliError message so its public exit behavior does not change.
 
-- [ ] **Step 1: Write focused failing reader and artifact tests**
+- [x] **Step 1: Write focused failing reader and artifact tests**
 
 Create tests with a local 192-row supervised CSV helper. The helper must include all existing model feature columns, timezone-aware Australia/Melbourne forecast_origin_at and target_observed_at columns, a non-missing target, all three weather value columns as pd.NA, and all three weather missing-marker columns as True. Write a local holiday JSON helper:
 
@@ -197,7 +197,7 @@ Add independent tests that assert:
 6. export rejects an eligible training row with a real weather value or a false weather marker;
 7. the existing LightGBM evaluation CLI still prints its normal summary for a valid CSV after the reader extraction.
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
 Run:
 
@@ -207,7 +207,7 @@ Run:
 
 Expected: collection fails because supervised_csv and lightgbm_artifact do not yet exist.
 
-- [ ] **Step 3: Implement the shared reader and integrity helpers**
+- [x] **Step 3: Implement the shared reader and integrity helpers**
 
 Create src/urbanflow/modeling/supervised_csv.py. Keep exactly the existing two timestamp names and parse only those columns when present. A source timestamp must be offset-bearing: first validate each original value is parseable and timezone-aware, then normalize the complete column with pd.to_datetime(..., format="mixed", utc=True). This makes a CSV spanning Melbourne's +10/+11 daylight-saving change a timezone-aware UTC series with the same real instants; do not call utc=True on a naive value and silently reinterpret it as UTC. The following is only the structural outline:
 
@@ -248,7 +248,7 @@ In pyproject.toml, add the direct runtime dependency:
 
 Place it beside LightGBM and scikit-learn rather than relying on scikit-learn's transitive dependency.
 
-- [ ] **Step 4: Implement the artifact format and validator**
+- [x] **Step 4: Implement the artifact format and validator**
 
 Create src/urbanflow/modeling/lightgbm_artifact.py with these fixed constants:
 
@@ -283,7 +283,7 @@ Implement export_lightgbm_artifact as the following sequence:
 
 The loader must first pass its raw str | Path input through that same canonical local-path validator, then require an existing local directory whose child names equal _EXPECTED_BUNDLE_FILES. It reads manifest JSON, validates every field before deserializing, compares model.joblib bytes to model_sha256, loads only then with joblib.load, requires FittedLightGBMModel, and validates its ordered features/config against the manifest and DEFAULT_RIDGE_FEATURE_SPEC. Return LoadedLightGBMArtifact only after every check passes.
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run:
 
@@ -295,7 +295,7 @@ Run:
 
 Expected: focused tests pass, the evaluator CLI regression passes, and Ruff reports no changes.
 
-- [ ] **Step 6: Commit the artifact-domain task**
+- [x] **Step 6: Commit the artifact-domain task**
 
 ~~~powershell
 git add pyproject.toml src/urbanflow/modeling/supervised_csv.py src/urbanflow/modeling/lightgbm_cli.py src/urbanflow/modeling/lightgbm_artifact.py tests/unit/modeling/test_supervised_csv.py tests/unit/modeling/test_lightgbm_artifact.py tests/unit/modeling/test_lightgbm_cli.py
@@ -330,7 +330,7 @@ def run_artifact_export(
 def main(argv: Sequence[str] | None = None) -> int: ...
 ~~~
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 Use tmp_path-only inputs. Test a successful invocation with a five-tree model and assert exit code 0, JSON stdout includes model_name, model_version, training_row_count, trained_through_at, and output_directory, and both artifact files exist. Add exact exit-code tests:
 
@@ -351,7 +351,7 @@ def test_cli_returns_two_for_invalid_operator_input(tmp_path: Path, capsys: pyte
 
 Also cover a zero n-estimators, non-positive learning rate, malformed calendar, existing destination, an opaque URI-like output such as s3:bucket/artifact, and a monkeypatched joblib.dump that raises OSError. The invalid output path must return 2 and create no artifact. The dump failure must return 1 rather than 2. Assert no test uses a network, a database URL, MLflow, or a committed models directory.
 
-- [ ] **Step 2: Run the focused CLI test and confirm RED**
+- [x] **Step 2: Run the focused CLI test and confirm RED**
 
 Run:
 
@@ -361,7 +361,7 @@ Run:
 
 Expected: collection fails because lightgbm_artifact_cli and the script wrapper do not exist.
 
-- [ ] **Step 3: Implement the thin CLI**
+- [x] **Step 3: Implement the thin CLI**
 
 Create the parser with positional supervised_csv and output_directory arguments plus:
 
@@ -398,7 +398,7 @@ if __name__ == "__main__":
 
 Do not import the rolling evaluator, MLflow, PostgreSQL, or FastAPI.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -410,7 +410,7 @@ Run:
 
 Expected: all artifact and CLI tests pass without filesystem output outside tmp_path.
 
-- [ ] **Step 5: Commit the export-CLI task**
+- [x] **Step 5: Commit the export-CLI task**
 
 ~~~powershell
 git add src/urbanflow/modeling/lightgbm_artifact_cli.py scripts/export_lightgbm_artifact.py tests/unit/modeling/test_lightgbm_artifact_cli.py
@@ -449,7 +449,7 @@ def forecast_unavailable_error() -> UrbanFlowApiError: ...
 
 - PostgresSensorHistoryRepository additionally implements get_recent_history(location_id, *, limit).
 
-- [ ] **Step 1: Write failing repository and error-mapping tests**
+- [x] **Step 1: Write failing repository and error-mapping tests**
 
 Extend the existing FakeSession tests. Add a deliberately descending list of PedestrianHourlyFact rows and assert this call returns them ascending:
 
@@ -495,7 +495,7 @@ With an existing sensor and each provider configured, assert exact 503 bodies. T
 
 Keep the existing no-provider-before-sensor behavior and the configured-provider unknown-sensor behavior unchanged.
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
 Run:
 
@@ -505,7 +505,7 @@ Run:
 
 Expected: imports or attribute lookups fail for RecentHistoryRepository, ForecastInputUnavailableError, forecast_unavailable_error, and get_recent_history.
 
-- [ ] **Step 3: Implement the narrow persistence boundary and error conversion**
+- [x] **Step 3: Implement the narrow persistence boundary and error conversion**
 
 In services.py, define RecentHistoryRepository separately from HistoryRepository so existing history fakes do not gain a speculative method. Define ForecastInputUnavailableError beside DataStoreUnavailableError.
 
@@ -564,7 +564,7 @@ def get_recent_history(
 
 Do not add validation or fallback behavior to the repository; its caller owns the exact-168 serving contract.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -576,7 +576,7 @@ Run:
 
 Expected: the new query is bounded and descending in SQL but ascending at the port, and both provider exceptions become the standard JSON envelope.
 
-- [ ] **Step 5: Commit the persistence/error task**
+- [x] **Step 5: Commit the persistence/error task**
 
 ~~~powershell
 git add src/urbanflow/api/services.py src/urbanflow/api/errors.py src/urbanflow/api/postgres.py tests/unit/api/test_forecasts.py tests/unit/api/test_postgres_repositories.py
@@ -616,7 +616,7 @@ class ArtifactBackedLightGBMForecastProvider:
 
 - The provider does not perform artifact I/O. Task 5 supplies an already validated LoadedLightGBMArtifact at startup.
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Create a RecordingRecentHistoryRepository with a records list, a calls list, and an optional DataStoreUnavailableError. Build an artifact under tmp_path using Task 1 with a valid all-weather-missing supervised CSV and a holiday calendar that covers the target dates. Cover this successful path:
 
@@ -656,7 +656,7 @@ Parameterize failure tests for 167 records, 169 records, reverse order, an exact
 
 Use recording models that return fewer and more prediction values than requested, plus values that cannot be converted to float. Call the provider through ForecastService with an existing sensor. None may become ForecastInputUnavailableError, be silently truncated, or fabricate a row; each must produce the exact `503 model_unavailable` code. Add the direct ForecastService error-envelope regression in test_forecasts.py for ForecastModelOutputError.
 
-- [ ] **Step 2: Run the focused provider test and confirm RED**
+- [x] **Step 2: Run the focused provider test and confirm RED**
 
 Run:
 
@@ -666,7 +666,7 @@ Run:
 
 Expected: collection fails because urbanflow.api.lightgbm_provider does not exist.
 
-- [ ] **Step 3: Implement the provider with strict serving-input validation**
+- [x] **Step 3: Implement the provider with strict serving-input validation**
 
 Create src/urbanflow/api/lightgbm_provider.py. Use explicit helpers rather than one large predict method:
 
@@ -746,7 +746,7 @@ if rows["forecast_horizon"].tolist() != list(range(1, horizon + 1)):
 
 predict validates horizon first, then obtains the records once with limit=168, calls these helpers, invokes artifact.model.predict(rows) once, and constructs ForecastPrediction values in forecast_horizon order from target_observed_at. Set generated_at=datetime.now(UTC), data_cutoff_at=cutoff, forecast_origin_at=cutoff, model_name=lightgbm, and model_version=artifact.manifest.model_version. Convert outputs to floats; if conversion fails or their count differs from the selected rows in either direction, raise ForecastModelOutputError. ForecastService maps that exception to the specified `model_unavailable` response; do not use ForecastInputUnavailableError, silently truncate output, or fabricate a row. Non-finite float values may reach the existing service-level finite-value validation. Do not catch DataStoreUnavailableError; do not clip predictions here; do not mutate the repository result.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -758,7 +758,7 @@ Run:
 
 Expected: real temporary artifact predictions form one direct batch; invalid runtime history never reaches model prediction; existing route-level clipping and malformed-batch tests remain green.
 
-- [ ] **Step 5: Commit the provider task**
+- [x] **Step 5: Commit the provider task**
 
 ~~~powershell
 git add src/urbanflow/api/lightgbm_provider.py src/urbanflow/api/services.py src/urbanflow/api/errors.py tests/unit/api/test_lightgbm_provider.py tests/unit/api/test_forecasts.py
@@ -789,7 +789,7 @@ def create_default_services(
 
 - Explicit create_app(services=injected_services) continues to bypass all environment inspection, database construction, and artifact loading.
 
-- [ ] **Step 1: Write failing configuration-matrix tests**
+- [x] **Step 1: Write failing configuration-matrix tests**
 
 In tests/conftest.py remove both DATABASE_URL_ENV_VAR and MODEL_ARTIFACT_PATH_ENV_VAR before test modules import the module-level Uvicorn app.
 
@@ -805,7 +805,7 @@ In test_app.py use monkeypatch to replace create_database_engine, create_session
 
 For the invalid-artifact row, use the existing StatementAwareSessionFactory and assert GET /api/v1/sensors succeeds while GET /api/v1/sensors/999001/forecast?horizon=1 returns the existing exact model_unavailable response. Also assert a malformed database URL still raises DatabaseConfigError, and injected ApiServices is used unchanged even when both environment strings are invalid.
 
-- [ ] **Step 2: Run the focused app tests and confirm RED**
+- [x] **Step 2: Run the focused app tests and confirm RED**
 
 Run:
 
@@ -815,7 +815,7 @@ Run:
 
 Expected: the new artifact-path constant/imports and matrix behavior fail.
 
-- [ ] **Step 3: Implement opt-in default-service wiring**
+- [x] **Step 3: Implement opt-in default-service wiring**
 
 In app.py define MODEL_ARTIFACT_PATH_ENV_VAR next to the factory or import one canonical constant from lightgbm_artifact. Resolve both strings from the supplied environ mapping, trimming whitespace. Keep the existing early return when the database URL is absent or blank:
 
@@ -849,7 +849,7 @@ return ApiServices(
 
 Do not catch DatabaseConfigError or SQLAlchemy ArgumentError beyond the existing malformed-URL conversion. Do not open a session, probe the model, call predict, change HealthService, or make artifact errors a startup exception.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -861,7 +861,7 @@ Run:
 
 Expected: configuration is lazy and deterministic; artifact-only never triggers I/O; bad artifacts degrade forecast only; injected tests remain isolated from ambient environment variables.
 
-- [ ] **Step 5: Commit the app-wiring task**
+- [x] **Step 5: Commit the app-wiring task**
 
 ~~~powershell
 git add src/urbanflow/api/app.py tests/conftest.py tests/unit/api/test_app.py
@@ -900,7 +900,7 @@ def run_lightgbm_forecast_smoke(
 def main(argv: list[str] | None = None, *, environ: Mapping[str, str] | None = None) -> int: ...
 ~~~
 
-- [ ] **Step 1: Write database-free smoke validation tests**
+- [x] **Step 1: Write database-free smoke validation tests**
 
 Copy only the safe schema-name and missing-URL test style from test_postgres_smoke.py. Assert:
 
@@ -911,7 +911,7 @@ Copy only the safe schema-name and missing-URL test style from test_postgres_smo
 
 Do not run run_lightgbm_forecast_smoke in routine pytest because it deliberately requires a PostgreSQL server.
 
-- [ ] **Step 2: Run the focused smoke test and confirm RED**
+- [x] **Step 2: Run the focused smoke test and confirm RED**
 
 Run:
 
@@ -921,7 +921,7 @@ Run:
 
 Expected: collection fails because lightgbm_forecast_smoke does not exist.
 
-- [ ] **Step 3: Implement the bounded opt-in integration smoke**
+- [x] **Step 3: Implement the bounded opt-in integration smoke**
 
 Follow the existing postgres_smoke.py lifecycle exactly: validate or generate a safe schema name before creating an engine, create only that schema, set its search_path on the smoke connection, create tables, and always DROP SCHEMA IF EXISTS quoted_schema CASCADE in finally after successful schema creation and before engine.dispose. Use only the validated, quoted schema identifier for CREATE, SET search_path, and DROP; bind the smoke session factory to the same configured Connection rather than the Engine.
 
@@ -944,7 +944,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ~~~
 
-- [ ] **Step 4: Run focused verification and, only if intentionally configured, the live smoke**
+- [x] **Step 4: Run focused verification and, only if intentionally configured, the live smoke**
 
 Run the database-free checks:
 
@@ -963,7 +963,7 @@ $env:URBANFLOW_SMOKE_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@lo
 
 Expected manual result: JSON with location_id 999001, forecast_horizons [1, ..., 24], a nonempty model_version, and no persistent schema or model artifact after completion.
 
-- [ ] **Step 5: Commit the optional live-smoke task**
+- [x] **Step 5: Commit the optional live-smoke task**
 
 ~~~powershell
 git add src/urbanflow/api/lightgbm_forecast_smoke.py scripts/smoke_test_lightgbm_forecast.py tests/unit/api/test_lightgbm_forecast_smoke.py
