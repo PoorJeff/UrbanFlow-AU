@@ -168,7 +168,10 @@ def test_export_creates_missing_parent_and_refuses_existing_destination(tmp_path
         )
 
 
-@pytest.mark.parametrize("output", ["s3://bucket/artifact", Path("s3://bucket/artifact")])
+@pytest.mark.parametrize(
+    "output",
+    ["s3://bucket/artifact", Path("s3://bucket/artifact"), "s3:bucket/artifact"],
+)
 def test_export_rejects_remote_looking_path_before_writing(
     tmp_path: Path,
     output: str | Path,
@@ -184,6 +187,22 @@ def test_export_rejects_remote_looking_path_before_writing(
             holiday_calendar=calendar,
             model_config=LightGBMModelConfig(n_estimators=5, min_child_samples=1),
         )
+
+
+@pytest.mark.parametrize(
+    "artifact_path",
+    ["s3://bucket/artifact", Path("s3://bucket/artifact"), "s3:bucket/artifact"],
+)
+def test_loader_rejects_all_multicharacter_uri_schemes(artifact_path: str | Path) -> None:
+    with pytest.raises(LightGBMArtifactError, match="local path"):
+        load_lightgbm_artifact(artifact_path)
+
+
+def test_loader_accepts_windows_drive_prefix_before_directory_check(monkeypatch) -> None:
+    monkeypatch.setattr(Path, "is_dir", lambda self: False)
+
+    with pytest.raises(LightGBMArtifactError, match="artifact directory does not exist"):
+        load_lightgbm_artifact(Path(r"C:\models\artifact"))
 
 
 @pytest.mark.parametrize(

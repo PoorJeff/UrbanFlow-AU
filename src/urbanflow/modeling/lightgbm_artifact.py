@@ -67,7 +67,7 @@ _WEATHER_CONTRACT = (
     ("wind_speed", "wind_speed_missing"),
 )
 _LOWERCASE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_NORMALIZED_URI_PREFIX = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):[\\/]")
+_URI_SCHEME_PREFIX = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):")
 
 
 class LightGBMArtifactError(ValueError):
@@ -151,8 +151,8 @@ def _validated_local_path(raw_path: str | Path) -> Path:
     if not isinstance(raw_text, str) or not raw_text.strip() or "://" in raw_text:
         raise LightGBMArtifactError("artifact location must be a local path")
     path = Path(raw_path)
-    normalized_match = _NORMALIZED_URI_PREFIX.match(str(path))
-    if normalized_match and len(normalized_match.group(1)) != 1:
+    scheme_match = _URI_SCHEME_PREFIX.match(str(path))
+    if scheme_match and len(scheme_match.group(1)) != 1:
         raise LightGBMArtifactError("artifact location must be a local path")
     return path
 
