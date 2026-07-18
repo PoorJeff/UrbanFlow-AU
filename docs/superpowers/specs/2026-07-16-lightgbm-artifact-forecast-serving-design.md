@@ -80,6 +80,14 @@ the ignored `models/` tree and contains exactly:
 └── model.joblib
 ```
 
+The raw configured string is checked before `Path` conversion: a value with
+`://` is rejected. The local-path validator also rejects an already-normalized
+URI-like form such as `s3:\bucket`, which Windows can produce from
+`Path("s3://bucket")`, while accepting ordinary drive paths such as
+`C:\models\artifact`. This same validator is used by export, load, and
+environment-driven API construction, so a remote-looking value can never
+become a local relative path by accident.
+
 `model.joblib` is a `FittedLightGBMModel`, including the fitted scikit-learn
 preprocessing pipeline. `manifest.json` has this versioned, JSON-only shape:
 
@@ -166,7 +174,8 @@ python scripts/export_lightgbm_artifact.py `
   --holiday-calendar data/modeling/holiday_calendar.json
 ```
 
-The command reads the existing supervised CSV, parses its timestamp columns,
+The command reads the existing supervised CSV, parses its offset-bearing
+timestamp columns,
 fits one final `FittedLightGBMModel` using every non-missing target row in that
 operator-supplied CSV, and writes the bundle described above. It does not reuse
 the rolling evaluator or claim that its final fit is a new evaluation. Its
@@ -175,6 +184,12 @@ parameters (`n_estimators`, `learning_rate`, `num_leaves`, and
 `min_child_samples`) so the export configuration is explicit and reproducible.
 It returns `2` for invalid input or output paths and `1` for serialization
 failures. It does not call MLflow, contact a database, or download data.
+
+The reader rejects a timestamp with no timezone offset. For a CSV that spans
+Melbourne's daylight-saving change, it validates each source value before
+normalizing the series to timezone-aware UTC instants; it must not silently
+treat a naive timestamp as UTC. This preserves chronology even when adjacent
+source rows use both `+10:00` and `+11:00` offsets.
 
 `--holiday-calendar` points to a local JSON object with exactly
 `coverage_start`, `coverage_end`, and `public_holidays` keys; the first two are
@@ -309,8 +324,9 @@ Routine tests remain fully offline and PostgreSQL-free.
    to verify export/load round trips, manifest fields, checksum/version mismatch,
    missing files, unsupported schema version, wrong model name, naive timestamps,
    invalid feature/config contract, malformed or uncovered holiday calendars,
-   weather-incompatible input, and refusal to overwrite an existing output
-   directory.
+   weather-incompatible input, refusal to overwrite an existing output
+   directory, raw and Path-normalized URI-like paths, and parsing across a
+   Melbourne daylight-saving offset change.
 2. Provider tests inject an in-memory recent-history repository and a loaded
    temporary artifact. They prove all direct horizons are returned in order,
    cutoff and target timestamps are correct, no row after the cutoff affects

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Use only the local directory named by URBANFLOW_API_MODEL_ARTIFACT_PATH; reject a value containing :// and never download or register a model remotely.
+- Use only the local directory named by URBANFLOW_API_MODEL_ARTIFACT_PATH; validate the raw string before converting it to Path, reject a value containing ://, also reject a Path-normalized URI-like form such as s3:\bucket, and never download or register a model remotely. Do not reject ordinary Windows drive paths such as C:\models\artifact.
 - Declare joblib as a direct dependency. The artifact contains a full FittedLightGBMModel, including its fitted scikit-learn preprocessing pipeline; never serialize only LGBMRegressor.
 - Artifact schema version is exactly 1. The directory contains exactly manifest.json and model.joblib. Existing destinations are refused, and creation uses a temporary sibling directory followed by a rename.
 - A valid artifact uses model_name lightgbm; model_version equals lightgbm- plus the first twelve lowercase hexadecimal characters of model_sha256; all model and source hashes are 64 lowercase hexadecimal characters.
@@ -130,13 +130,13 @@ def export_lightgbm_artifact(
     supervised_frame: pd.DataFrame,
     *,
     source_csv_sha256: str,
-    output_directory: Path,
+    output_directory: str | Path,
     holiday_calendar: HolidayCalendar,
     model_config: LightGBMModelConfig,
     evaluation_summary_path: str | None = None,
 ) -> LightGBMArtifactManifest: ...
 
-def load_lightgbm_artifact(path: Path) -> LoadedLightGBMArtifact: ...
+def load_lightgbm_artifact(path: str | Path) -> LoadedLightGBMArtifact: ...
 ~~~
 
 - The existing evaluation CLI must use read_supervised_csv and convert SupervisedCsvError to its existing LightGBMEvaluationCliError message so its public exit behavior does not change.
@@ -187,9 +187,9 @@ def test_artifact_round_trip_preserves_pipeline_and_manifest(tmp_path: Path) -> 
 
 Add independent tests that assert:
 
-1. read_supervised_csv parses both timestamp columns and rejects a missing path, malformed CSV, and an unparseable present timestamp column;
+1. read_supervised_csv parses both timestamp columns, preserves the true UTC instants of a Melbourne CSV spanning the +10/+11 daylight-saving offset change, and rejects a missing path, malformed CSV, an unparseable present timestamp column, or a timezone-naive timestamp;
 2. sha256_file equals hashlib.sha256(path.read_bytes()).hexdigest();
-3. export creates a missing local parent directory, rejects an existing destination, and rejects a path containing :// before any artifact write;
+3. export creates a missing local parent directory, rejects an existing destination, and rejects both a raw path containing :// and a URI-like path already normalized by Path (for example Path("s3://bucket/artifact")) before any artifact write;
 4. loader rejects a missing bundle member, an extra bundle member, wrong schema version/model name, uppercase or checksum-mismatched hash, a version not derived from the checksum, a naive created_at or trained_through_at, invalid model-config types/ranges, and feature columns that differ from either fitted-model feature source;
 5. HolidayCalendar rejects a wrong key set, invalid ISO date, reversed coverage, duplicate/unsorted/out-of-range holiday, and a coverage miss;
 6. export rejects an eligible training row with a real weather value or a false weather marker;
@@ -207,7 +207,7 @@ Expected: collection fails because supervised_csv and lightgbm_artifact do not y
 
 - [ ] **Step 3: Implement the shared reader and integrity helpers**
 
-Create src/urbanflow/modeling/supervised_csv.py. Keep exactly the existing two timestamp names and parse only those columns when present:
+Create src/urbanflow/modeling/supervised_csv.py. Keep exactly the existing two timestamp names and parse only those columns when present. A source timestamp must be offset-bearing: first validate each original value is parseable and timezone-aware, then normalize the complete column with pd.to_datetime(..., format="mixed", utc=True). This makes a CSV spanning Melbourne's +10/+11 daylight-saving change a timezone-aware UTC series with the same real instants; do not call utc=True on a naive value and silently reinterpret it as UTC. The following is only the structural outline:
 
 ~~~python
 TIMESTAMP_COLUMNS = ("forecast_origin_at", "target_observed_at")
@@ -225,7 +225,7 @@ def read_supervised_csv(path: Path) -> pd.DataFrame:
     for column in TIMESTAMP_COLUMNS:
         if column in frame.columns:
             try:
-                frame[column] = pd.to_datetime(frame[column])
+                frame[column] = parse_offset_aware_timestamp_column(frame[column])
             except (TypeError, ValueError) as exc:
                 raise SupervisedCsvError(
                     f"could not parse timestamp column: {column}"
@@ -271,7 +271,7 @@ def contains(self, value: date) -> bool:
 
 Implement export_lightgbm_artifact as the following sequence:
 
-1. reject a non-local output string containing ://, then reject an existing output directory and create its missing local parent directory;
+1. pass the raw str | Path output argument through one canonical local-path validator before any Path coercion or filesystem write; it rejects :// and URI-like normalized forms such as s3:\bucket while accepting Windows drive paths, then reject an existing output directory and create its missing local parent directory;
 2. call select_training_rows, then validate all eligible weather value cells are missing and their three markers are exactly true;
 3. require timezone-aware forecast_origin_at values, derive trained_through_at as their maximum, and fit the complete pipeline with fit_lightgbm_model;
 4. require fitted_model.config.feature_spec and fitted_model.feature_columns to equal DEFAULT_RIDGE_FEATURE_SPEC and its ordered feature_columns;
@@ -279,7 +279,7 @@ Implement export_lightgbm_artifact as the following sequence:
 6. write manifest.json with sorted JSON keys and a trailing newline, validate the temporary bundle through load_lightgbm_artifact, then rename the temporary directory to the absent output path;
 7. on serialization or atomic-output failures, remove only that temporary directory and raise LightGBMArtifactSerializationError. On validation/input failures, raise LightGBMArtifactError. Never overwrite an existing output.
 
-The loader must first require an existing local directory whose child names equal _EXPECTED_BUNDLE_FILES. It reads manifest JSON, validates every field before deserializing, compares model.joblib bytes to model_sha256, loads only then with joblib.load, requires FittedLightGBMModel, and validates its ordered features/config against the manifest and DEFAULT_RIDGE_FEATURE_SPEC. Return LoadedLightGBMArtifact only after every check passes.
+The loader must first pass its raw str | Path input through that same canonical local-path validator, then require an existing local directory whose child names equal _EXPECTED_BUNDLE_FILES. It reads manifest JSON, validates every field before deserializing, compares model.joblib bytes to model_sha256, loads only then with joblib.load, requires FittedLightGBMModel, and validates its ordered features/config against the manifest and DEFAULT_RIDGE_FEATURE_SPEC. Return LoadedLightGBMArtifact only after every check passes.
 
 - [ ] **Step 5: Run focused verification**
 
@@ -795,7 +795,7 @@ configured_artifact_path = values.get(MODEL_ARTIFACT_PATH_ENV_VAR)
 model_provider: ForecastModelProvider | None = None
 if configured_artifact_path is not None and configured_artifact_path.strip():
     try:
-        artifact = load_lightgbm_artifact(Path(configured_artifact_path.strip()))
+        artifact = load_lightgbm_artifact(configured_artifact_path.strip())
     except LightGBMArtifactError:
         model_provider = None
     else:
