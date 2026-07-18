@@ -8,6 +8,7 @@ import pandas as pd
 from urbanflow.api.services import (
     ForecastBatch,
     ForecastInputUnavailableError,
+    ForecastModelOutputError,
     ForecastPrediction,
     HistoryRecord,
     RecentHistoryRepository,
@@ -139,7 +140,13 @@ class ArtifactBackedLightGBMForecastProvider:
             calendar=calendar,
         )
 
-        predicted_values = tuple(float(value) for value in self._artifact.model.predict(rows))
+        raw_predictions = self._artifact.model.predict(rows)
+        try:
+            predicted_values = tuple(float(value) for value in raw_predictions)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ForecastModelOutputError("model predictions are not numeric") from exc
+        if len(predicted_values) != len(rows):
+            raise ForecastModelOutputError("model returned an invalid prediction count")
         predictions = tuple(
             ForecastPrediction(
                 forecast_horizon=int(row.forecast_horizon),
@@ -149,7 +156,7 @@ class ArtifactBackedLightGBMForecastProvider:
             for row, predicted_count in zip(
                 rows.itertuples(index=False),
                 predicted_values,
-                strict=False,
+                strict=True,
             )
         )
         return ForecastBatch(

@@ -53,12 +53,12 @@ class RecordingRecentHistoryRepository:
 
 @dataclass
 class RecordingModel:
-    predictions: tuple[float, ...]
+    predictions: tuple[object, ...]
     calls: list[pd.DataFrame] = field(default_factory=list)
 
     def predict(self, frame: pd.DataFrame) -> np.ndarray:
         self.calls.append(frame.copy())
-        return np.asarray(self.predictions, dtype=float)
+        return np.asarray(self.predictions)
 
 
 def _history(
@@ -449,8 +449,19 @@ def test_data_store_failure_propagates_unchanged() -> None:
     assert repository.calls == [(101, 168)]
 
 
-def test_short_model_output_remains_a_model_unavailable_error() -> None:
-    model = RecordingModel(predictions=(1.0,))
+@pytest.mark.parametrize(
+    "predictions",
+    [
+        (1.0,),
+        (1.0, 2.0, 3.0),
+        ("not-a-number", 2.0),
+    ],
+    ids=["short", "overlong", "nonconvertible"],
+)
+def test_invalid_model_output_remains_a_model_unavailable_error(
+    predictions: tuple[object, ...],
+) -> None:
+    model = RecordingModel(predictions=predictions)
     provider = ArtifactBackedLightGBMForecastProvider(
         artifact=_recording_artifact(model),
         history_repository=RecordingRecentHistoryRepository(records=_history()),

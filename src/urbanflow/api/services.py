@@ -15,6 +15,7 @@ from urbanflow import __version__
 from urbanflow.api.errors import (
     UrbanFlowApiError,
     data_store_unavailable_error,
+    forecast_model_output_error,
     forecast_unavailable_error,
 )
 from urbanflow.api.schemas import (
@@ -111,6 +112,10 @@ class ForecastInputUnavailableError(RuntimeError):
     """Raised when serving inputs cannot satisfy the forecast contract."""
 
 
+class ForecastModelOutputError(RuntimeError):
+    """Raised when a forecast model returns an invalid prediction batch."""
+
+
 class MetricsUnavailableError(RuntimeError):
     """Raised when configured model evaluation metadata cannot be read or validated."""
 
@@ -199,6 +204,8 @@ class ForecastService:
             raise data_store_unavailable_error() from exc
         except ForecastInputUnavailableError as exc:
             raise forecast_unavailable_error() from exc
+        except ForecastModelOutputError as exc:
+            raise forecast_model_output_error() from exc
         _validate_forecast_horizons(batch=batch, horizon=horizon)
         return ForecastBatch(
             model_name=batch.model_name,

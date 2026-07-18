@@ -38,6 +38,14 @@ def forecast_unavailable_error() -> UrbanFlowApiError:
     )
 
 
+def forecast_model_output_error() -> UrbanFlowApiError:
+    return UrbanFlowApiError(
+        status_code=503,
+        code="model_unavailable",
+        message="Forecast provider returned an invalid prediction batch.",
+    )
+
+
 def metrics_unavailable_error() -> UrbanFlowApiError:
     return UrbanFlowApiError(
         status_code=503,
