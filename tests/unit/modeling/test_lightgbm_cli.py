@@ -130,6 +130,21 @@ def test_lightgbm_evaluation_cli_returns_two_for_missing_input(tmp_path, capsys)
     assert "CSV file does not exist" in captured.err
 
 
+def test_lightgbm_evaluation_cli_preserves_reader_error_behavior(tmp_path, capsys) -> None:
+    frame = supervised_rows()
+    frame["forecast_origin_at"] = frame["forecast_origin_at"].astype(str)
+    frame.loc[0, "forecast_origin_at"] = "2025-01-01T00:00:00"
+    path = tmp_path / "naive_timestamp.csv"
+    frame.to_csv(path, index=False)
+
+    exit_code = main([str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "could not parse timestamp column: forecast_origin_at" in captured.err
+
+
 def test_lightgbm_evaluation_cli_returns_two_for_invalid_options(tmp_path, capsys) -> None:
     path = write_supervised_csv(tmp_path)
 

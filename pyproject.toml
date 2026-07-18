@@ -13,6 +13,7 @@ dependencies = [
     "alembic>=1.13,<2",
     "fastapi>=0.139,<1",
     "httpx>=0.28,<1",
+    "joblib>=1.2,<2",
     "lightgbm>=4.6,<5",
     "mlflow>=3,<4",
     "pandas>=2.1,<4",

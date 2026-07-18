@@ -19,8 +19,13 @@ from urbanflow.modeling.lightgbm_evaluation import (
 )
 from urbanflow.modeling.metrics import RegressionMetrics
 from urbanflow.modeling.splits import SplitConfigError, build_rolling_origin_splits
+from urbanflow.modeling.supervised_csv import (
+    TIMESTAMP_COLUMNS,
+    SupervisedCsvError,
+    read_supervised_csv,
+)
 
-TIMESTAMP_COLUMNS = ("forecast_origin_at", "target_observed_at")
+EVALUATION_TIMEZONE = "Australia/Melbourne"
 
 
 class LightGBMEvaluationCliError(ValueError):
@@ -79,25 +84,6 @@ def _positive_float(value: float, *, name: str) -> float:
     if value <= 0:
         raise LightGBMEvaluationCliError(f"{name} must be greater than zero")
     return value
-
-
-def _read_supervised_csv(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise LightGBMEvaluationCliError(f"CSV file does not exist: {path}")
-    try:
-        frame = pd.read_csv(path)
-    except (OSError, pd.errors.ParserError) as exc:
-        raise LightGBMEvaluationCliError(f"could not read supervised CSV: {path}") from exc
-
-    for column in TIMESTAMP_COLUMNS:
-        if column in frame.columns:
-            try:
-                frame[column] = pd.to_datetime(frame[column])
-            except (TypeError, ValueError) as exc:
-                raise LightGBMEvaluationCliError(
-                    f"could not parse timestamp column: {column}"
-                ) from exc
-    return frame
 
 
 def _json_scalar(value: object) -> object:
@@ -186,7 +172,13 @@ def run_lightgbm_evaluation(
     validation_months: int,
     model_config: LightGBMModelConfig,
 ) -> dict[str, Any]:
-    supervised_frame = _read_supervised_csv(supervised_csv)
+    try:
+        supervised_frame = read_supervised_csv(supervised_csv)
+    except SupervisedCsvError as exc:
+        raise LightGBMEvaluationCliError(str(exc)) from exc
+    for column in TIMESTAMP_COLUMNS:
+        if column in supervised_frame:
+            supervised_frame[column] = supervised_frame[column].dt.tz_convert(EVALUATION_TIMEZONE)
     splits = build_rolling_origin_splits(
         supervised_frame,
         validation_months=validation_months,
