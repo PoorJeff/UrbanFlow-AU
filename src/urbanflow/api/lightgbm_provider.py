@@ -44,7 +44,14 @@ def _history_to_observations(
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:
             raise ForecastInputUnavailableError("history timestamp is timezone-naive")
         instant = observed_at.astimezone(UTC)
-        if any((instant.minute, instant.second, instant.microsecond)):
+        if any(
+            (
+                instant.minute,
+                instant.second,
+                instant.microsecond,
+                getattr(instant, "nanosecond", 0),
+            )
+        ):
             raise ForecastInputUnavailableError("history timestamp is not an exact hour")
         if previous_instant is not None and instant - previous_instant != timedelta(hours=1):
             raise ForecastInputUnavailableError("history is not contiguous")

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import urbanflow.api.lightgbm_provider as lightgbm_provider_module
 from urbanflow.api.lightgbm_provider import ArtifactBackedLightGBMForecastProvider
 from urbanflow.api.services import (
     DataStoreUnavailableError,
@@ -250,6 +251,63 @@ def test_predict_builds_direct_features_across_melbourne_dst_fallback() -> None:
     ]
 
 
+def test_history_normalization_preserves_both_fallback_two_oclock_instants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history = _history(end=datetime(2026, 4, 4, 16, tzinfo=UTC))
+    repository = RecordingRecentHistoryRepository(records=history)
+    model = RecordingModel(predictions=(1.0,))
+    captured_observations: list[pd.DataFrame] = []
+    real_builder = lightgbm_provider_module.build_supervised_frame
+
+    def recording_builder(
+        observations: pd.DataFrame,
+        **kwargs: object,
+    ) -> pd.DataFrame:
+        captured_observations.append(observations.copy())
+        return real_builder(observations, **kwargs)
+
+    monkeypatch.setattr(
+        lightgbm_provider_module,
+        "build_supervised_frame",
+        recording_builder,
+    )
+    provider = ArtifactBackedLightGBMForecastProvider(
+        artifact=_recording_artifact(
+            model,
+            calendar=HolidayCalendar(
+                coverage_start=date(2026, 4, 5),
+                coverage_end=date(2026, 4, 5),
+                public_holidays=(),
+            ),
+        ),
+        history_repository=repository,
+    )
+
+    provider.predict(location_id=101, horizon=1)
+
+    assert len(captured_observations) == 1
+    normalized = captured_observations[0]["observed_at"].tolist()
+    fallback_hours = [
+        timestamp
+        for timestamp in normalized
+        if timestamp.date() == date(2026, 4, 5) and timestamp.hour == 2
+    ]
+    assert len(fallback_hours) == 2
+    assert [timestamp.utcoffset() for timestamp in fallback_hours] == [
+        timedelta(hours=11),
+        timedelta(hours=10),
+    ]
+    assert [timestamp.astimezone(UTC) for timestamp in fallback_hours] == [
+        pd.Timestamp("2026-04-04T15:00:00Z"),
+        pd.Timestamp("2026-04-04T16:00:00Z"),
+    ]
+    assert fallback_hours[1].astimezone(UTC) - fallback_hours[0].astimezone(UTC) == timedelta(
+        hours=1
+    )
+    assert model.calls[0]["forecast_origin_at"].iloc[0] == pd.Timestamp(fallback_hours[-1])
+
+
 def _invalid_history(case: str) -> list[HistoryRecord]:
     records = _history()
     if case == "167-records":
@@ -279,6 +337,14 @@ def _invalid_history(case: str) -> list[HistoryRecord]:
             observed_at=records[80].observed_at + timedelta(minutes=30),
             pedestrian_count=records[80].pedestrian_count,
         )
+    elif case == "nanosecond":
+        return [
+            HistoryRecord(
+                observed_at=pd.Timestamp(record.observed_at) + pd.Timedelta(1, unit="ns"),
+                pedestrian_count=record.pedestrian_count,
+            )
+            for record in records
+        ]
     elif case == "bool-count":
         records[80] = HistoryRecord(
             observed_at=records[80].observed_at,
@@ -308,6 +374,7 @@ def _invalid_history(case: str) -> list[HistoryRecord]:
         "gap",
         "naive-timestamp",
         "minute-30",
+        "nanosecond",
         "bool-count",
         "float-count",
         "negative-count",
