@@ -888,7 +888,7 @@ SMOKE_DATABASE_URL_ENV_VAR = "URBANFLOW_SMOKE_DATABASE_URL"
 class LightGBMForecastSmokeResult:
     schema_name: str
     location_id: int
-    data_cutoff_at: datetime
+    data_cutoff_at: str
     forecast_horizons: list[int]
     model_version: str
 
@@ -907,7 +907,7 @@ Copy only the safe schema-name and missing-URL test style from test_postgres_smo
 1. validate_smoke_schema_name accepts generated lowercase names and rejects dangerous identifiers;
 2. main returns 2 and names URBANFLOW_SMOKE_DATABASE_URL when neither a flag nor environment supplies a database URL;
 3. parser accepts an optional --schema-name and no artifact/network arguments;
-4. LightGBMForecastSmokeResult serializes with JSON-safe primitive values.
+4. LightGBMForecastSmokeResult serializes with JSON-safe primitive values, including an ISO-8601 string data_cutoff_at.
 
 Do not run run_lightgbm_forecast_smoke in routine pytest because it deliberately requires a PostgreSQL server.
 
@@ -923,7 +923,7 @@ Expected: collection fails because lightgbm_forecast_smoke does not exist.
 
 - [ ] **Step 3: Implement the bounded opt-in integration smoke**
 
-Follow the existing postgres_smoke.py lifecycle exactly: validate or generate a safe schema name, create only that schema, set its search_path on the smoke connection, create tables, and always DROP SCHEMA IF EXISTS quoted_schema CASCADE in finally before engine.dispose.
+Follow the existing postgres_smoke.py lifecycle exactly: validate or generate a safe schema name before creating an engine, create only that schema, set its search_path on the smoke connection, create tables, and always DROP SCHEMA IF EXISTS quoted_schema CASCADE in finally after successful schema creation and before engine.dispose. Use only the validated, quoted schema identifier for CREATE, SET search_path, and DROP; bind the smoke session factory to the same configured Connection rather than the Engine.
 
 Inside tempfile.TemporaryDirectory:
 
@@ -935,7 +935,7 @@ Inside tempfile.TemporaryDirectory:
 6. construct PostgresSensorHistoryRepository from that same schema-bound session factory, then construct ArtifactBackedLightGBMForecastProvider;
 7. call predict(999001, 24) and assert horizons 1 through 24, finite non-negative predictions, a cutoff equal to the final source instant, and the artifact model version.
 
-Return only schema_name, location_id, ISO-safe cutoff data, ordered horizons, and model version. main prints json.dumps(asdict(result), sort_keys=True), returns 2 for configuration/value errors, and 1 for SQLAlchemy or artifact/provider operational failures. The script wrapper contains only:
+Return only schema_name, location_id, ISO-safe cutoff data, ordered horizons, and model version; data_cutoff_at is `batch.data_cutoff_at.isoformat()` so `json.dumps(asdict(result), sort_keys=True)` succeeds without a custom encoder. main prints that JSON, returns 2 for configuration/value errors, and 1 for SQLAlchemy or artifact/provider operational failures. Catch artifact/model/provider/SQLAlchemy failures before a generic ValueError branch because LightGBMArtifactError is a ValueError subclass: LightGBMArtifactError, LightGBMArtifactSerializationError, ModelTrainingError, DataStoreUnavailableError, ForecastInputUnavailableError, ForecastModelOutputError, and SQLAlchemyError return 1; missing URL, invalid schema, and other configuration/value errors return 2. The script wrapper contains only:
 
 ~~~python
 from urbanflow.api.lightgbm_forecast_smoke import main

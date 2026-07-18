@@ -359,7 +359,9 @@ Routine tests remain fully offline and PostgreSQL-free.
 6. The full Ruff, format, pytest, and bounded Uvicorn `/health` smoke remain
    required. CI runs the same bounded default-configured health smoke after
    pytest. A manual PostgreSQL-and-artifact smoke is optional and only runs
-   when the operator explicitly provides both local resources.
+   when the operator explicitly provides both local resources. Its result is
+   directly JSON-serializable and reports its cutoff as an ISO-8601 string;
+   it creates and drops only a validated temporary schema.
 
 ## Alternatives considered
 
