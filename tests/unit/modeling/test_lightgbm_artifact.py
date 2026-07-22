@@ -411,3 +411,15 @@ def test_loader_rejects_fitted_pipeline_outside_project_structure(tmp_path: Path
 
     with pytest.raises(LightGBMArtifactError, match="pipeline"):
         load_lightgbm_artifact(artifact)
+
+
+def test_loader_normalizes_malformed_fitted_pipeline_steps(tmp_path: Path) -> None:
+    artifact = build_artifact(tmp_path)
+    model_path = artifact / "model.joblib"
+    model = joblib.load(model_path)
+    model.pipeline.steps = [model.pipeline.steps[0], ("model",)]
+    joblib.dump(model, model_path)
+    refresh_model_integrity(artifact)
+
+    with pytest.raises(LightGBMArtifactError, match="contract"):
+        load_lightgbm_artifact(artifact)

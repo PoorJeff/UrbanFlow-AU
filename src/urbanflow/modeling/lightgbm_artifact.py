@@ -525,6 +525,8 @@ def load_lightgbm_artifact(path: str | Path) -> LoadedLightGBMArtifact:
         raise LightGBMArtifactError("artifact model has an unsupported type")
     try:
         _validate_fitted_model_contract(model, manifest=manifest)
-    except (AttributeError, TypeError) as exc:
+    except LightGBMArtifactError:
+        raise
+    except Exception as exc:
         raise LightGBMArtifactError("artifact model contract is invalid") from exc
     return LoadedLightGBMArtifact(manifest=manifest, model=model)
