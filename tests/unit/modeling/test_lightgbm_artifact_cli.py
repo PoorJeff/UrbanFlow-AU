@@ -209,6 +209,10 @@ def test_cli_returns_two_for_non_numeric_training_values(
     assert not (tmp_path / "artifact").exists()
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning"
+)
+@pytest.mark.filterwarnings("ignore:Skipping features without any observed values:UserWarning")
 def test_cli_hashes_the_same_source_byte_snapshot_that_it_parses(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

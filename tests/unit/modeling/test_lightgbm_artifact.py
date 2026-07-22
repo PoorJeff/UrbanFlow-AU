@@ -376,6 +376,10 @@ def test_loader_rejects_fitted_config_feature_source_mismatch(tmp_path: Path) ->
         load_lightgbm_artifact(artifact)
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning"
+)
+@pytest.mark.filterwarnings("ignore:Skipping features without any observed values:UserWarning")
 @pytest.mark.parametrize(
     ("replacement", "error_match"),
     [
@@ -399,6 +403,10 @@ def test_loader_normalizes_invalid_nested_fitted_model_contract(
         load_lightgbm_artifact(artifact)
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning"
+)
+@pytest.mark.filterwarnings("ignore:Skipping features without any observed values:UserWarning")
 def test_loader_rejects_fitted_pipeline_outside_project_structure(tmp_path: Path) -> None:
     artifact = build_artifact(tmp_path)
     model_path = artifact / "model.joblib"
@@ -413,6 +421,10 @@ def test_loader_rejects_fitted_pipeline_outside_project_structure(tmp_path: Path
         load_lightgbm_artifact(artifact)
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning"
+)
+@pytest.mark.filterwarnings("ignore:Skipping features without any observed values:UserWarning")
 def test_loader_normalizes_malformed_fitted_pipeline_steps(tmp_path: Path) -> None:
     artifact = build_artifact(tmp_path)
     model_path = artifact / "model.joblib"
