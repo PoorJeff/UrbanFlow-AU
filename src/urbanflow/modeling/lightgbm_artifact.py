@@ -14,6 +14,8 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+from lightgbm import LGBMRegressor
+from sklearn.compose import ColumnTransformer
 from sklearn.exceptions import NotFittedError
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
@@ -289,10 +291,24 @@ def _validate_fitted_model_contract(
         raise LightGBMArtifactError("manifest feature_columns do not match the supported spec")
     if not isinstance(model.pipeline, Pipeline):
         raise LightGBMArtifactError("fitted model pipeline has an unsupported type")
+    if tuple(name for name, _ in model.pipeline.steps) != ("features", "model"):
+        raise LightGBMArtifactError("fitted model pipeline has unsupported steps")
+    features = model.pipeline.named_steps["features"]
+    regressor = model.pipeline.named_steps["model"]
+    if not isinstance(features, ColumnTransformer):
+        raise LightGBMArtifactError("fitted model pipeline features step has an unsupported type")
+    if not isinstance(regressor, LGBMRegressor):
+        raise LightGBMArtifactError("fitted model pipeline model step has an unsupported type")
     try:
         check_is_fitted(model.pipeline)
+        check_is_fitted(features)
+        check_is_fitted(regressor)
     except NotFittedError as exc:
         raise LightGBMArtifactError("fitted model pipeline is not fitted") from exc
+    if tuple(model.pipeline.feature_names_in_) != expected_columns:
+        raise LightGBMArtifactError("fitted model pipeline feature input is unsupported")
+    if tuple(features.feature_names_in_) != expected_columns:
+        raise LightGBMArtifactError("fitted model preprocessing feature input is unsupported")
     if not isinstance(model.config, LightGBMModelConfig):
         raise LightGBMArtifactError("fitted model config has an unsupported type")
     if model.feature_columns != expected_columns:

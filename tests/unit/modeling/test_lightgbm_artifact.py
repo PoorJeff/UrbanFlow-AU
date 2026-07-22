@@ -397,3 +397,17 @@ def test_loader_normalizes_invalid_nested_fitted_model_contract(
 
     with pytest.raises(LightGBMArtifactError, match=error_match):
         load_lightgbm_artifact(artifact)
+
+
+def test_loader_rejects_fitted_pipeline_outside_project_structure(tmp_path: Path) -> None:
+    artifact = build_artifact(tmp_path)
+    model_path = artifact / "model.joblib"
+    model = joblib.load(model_path)
+    wrong_pipeline = Pipeline([("scale", StandardScaler())]).fit(
+        pd.DataFrame({"value": [1.0, 2.0]})
+    )
+    joblib.dump(replace(model, pipeline=wrong_pipeline), model_path)
+    refresh_model_integrity(artifact)
+
+    with pytest.raises(LightGBMArtifactError, match="pipeline"):
+        load_lightgbm_artifact(artifact)
