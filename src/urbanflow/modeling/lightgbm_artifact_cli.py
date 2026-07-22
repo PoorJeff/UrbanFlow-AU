@@ -17,8 +17,7 @@ from urbanflow.modeling.lightgbm_artifact import (
 )
 from urbanflow.modeling.supervised_csv import (
     SupervisedCsvError,
-    read_supervised_csv,
-    sha256_file,
+    read_supervised_csv_snapshot,
 )
 
 
@@ -97,8 +96,7 @@ def run_artifact_export(
     model_config: LightGBMModelConfig,
     evaluation_summary_path: str | None,
 ) -> LightGBMArtifactManifest:
-    supervised_frame = read_supervised_csv(supervised_csv)
-    source_csv_sha256 = sha256_file(supervised_csv)
+    supervised_frame, source_csv_sha256 = read_supervised_csv_snapshot(supervised_csv)
     holiday_calendar = HolidayCalendar.from_json_file(holiday_calendar_path)
     return export_lightgbm_artifact(
         supervised_frame,

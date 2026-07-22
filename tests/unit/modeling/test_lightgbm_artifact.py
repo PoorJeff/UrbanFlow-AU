@@ -9,6 +9,8 @@ from pathlib import Path
 import joblib
 import pandas as pd
 import pytest
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from urbanflow.modeling.feature_matrix import DEFAULT_RIDGE_FEATURE_SPEC
 from urbanflow.modeling.lightgbm import FittedLightGBMModel, LightGBMModelConfig
@@ -371,4 +373,27 @@ def test_loader_rejects_fitted_config_feature_source_mismatch(tmp_path: Path) ->
     refresh_model_integrity(artifact)
 
     with pytest.raises(LightGBMArtifactError, match="feature"):
+        load_lightgbm_artifact(artifact)
+
+
+@pytest.mark.parametrize(
+    ("replacement", "error_match"),
+    [
+        ({"pipeline": None}, "pipeline"),
+        ({"pipeline": Pipeline([("scale", StandardScaler())])}, "fitted"),
+        ({"config": None}, "config"),
+    ],
+)
+def test_loader_normalizes_invalid_nested_fitted_model_contract(
+    tmp_path: Path,
+    replacement: dict[str, object],
+    error_match: str,
+) -> None:
+    artifact = build_artifact(tmp_path)
+    model_path = artifact / "model.joblib"
+    model = joblib.load(model_path)
+    joblib.dump(replace(model, **replacement), model_path)
+    refresh_model_integrity(artifact)
+
+    with pytest.raises(LightGBMArtifactError, match=error_match):
         load_lightgbm_artifact(artifact)

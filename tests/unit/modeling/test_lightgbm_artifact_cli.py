@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import subprocess
@@ -10,6 +11,7 @@ import joblib
 import pandas as pd
 import pytest
 
+from urbanflow.modeling import supervised_csv as supervised_csv_module
 from urbanflow.modeling.lightgbm_artifact_cli import build_parser, main
 
 
@@ -182,6 +184,85 @@ def test_cli_returns_two_for_malformed_holiday_calendar(
     assert exit_code == 2
     assert captured.out == ""
     assert "invalid holiday calendar" in captured.err
+    assert not (tmp_path / "artifact").exists()
+
+
+@pytest.mark.parametrize("column", ["target", "lag_1"])
+def test_cli_returns_two_for_non_numeric_training_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    column: str,
+) -> None:
+    arguments = valid_arguments(tmp_path)
+    source_path = Path(arguments[0])
+    frame = pd.read_csv(source_path)
+    frame[column] = frame[column].astype(object)
+    frame.loc[0, column] = "not-a-number"
+    frame.to_csv(source_path, index=False)
+
+    exit_code = main(arguments)
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "error:" in captured.err
+    assert not (tmp_path / "artifact").exists()
+
+
+def test_cli_hashes_the_same_source_byte_snapshot_that_it_parses(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments = valid_arguments(tmp_path)
+    source_path = Path(arguments[0])
+    original_bytes = source_path.read_bytes()
+    changed_bytes = b"changed,on,disk\n1,2,3\n"
+    original_read_csv = supervised_csv_module.pd.read_csv
+    source_was_changed = False
+
+    def read_csv_then_change_source(*args: object, **kwargs: object) -> pd.DataFrame:
+        nonlocal source_was_changed
+        frame = original_read_csv(*args, **kwargs)
+        if not source_was_changed:
+            source_path.write_bytes(changed_bytes)
+            source_was_changed = True
+        return frame
+
+    monkeypatch.setattr(supervised_csv_module.pd, "read_csv", read_csv_then_change_source)
+
+    exit_code = main(arguments)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    manifest = json.loads((tmp_path / "artifact" / "manifest.json").read_text(encoding="utf-8"))
+    assert source_path.read_bytes() == changed_bytes
+    assert manifest["training_data_sha256"] == hashlib.sha256(original_bytes).hexdigest()
+
+
+def test_cli_returns_two_for_unreadable_supervised_csv_snapshot(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments = valid_arguments(tmp_path)
+    source_path = Path(arguments[0])
+    original_read_bytes = Path.read_bytes
+
+    def reject_source_read(path: Path) -> bytes:
+        if path == source_path:
+            raise PermissionError("access denied")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_source_read)
+
+    exit_code = main(arguments)
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "error:" in captured.err
     assert not (tmp_path / "artifact").exists()
 
 

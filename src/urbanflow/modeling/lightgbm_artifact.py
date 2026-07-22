@@ -14,6 +14,9 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.exceptions import NotFittedError
+from sklearn.pipeline import Pipeline
+from sklearn.utils.validation import check_is_fitted
 
 from urbanflow.modeling.feature_matrix import (
     DEFAULT_RIDGE_FEATURE_SPEC,
@@ -284,6 +287,14 @@ def _validate_fitted_model_contract(
     expected_columns = DEFAULT_RIDGE_FEATURE_SPEC.feature_columns
     if manifest.feature_columns != expected_columns:
         raise LightGBMArtifactError("manifest feature_columns do not match the supported spec")
+    if not isinstance(model.pipeline, Pipeline):
+        raise LightGBMArtifactError("fitted model pipeline has an unsupported type")
+    try:
+        check_is_fitted(model.pipeline)
+    except NotFittedError as exc:
+        raise LightGBMArtifactError("fitted model pipeline is not fitted") from exc
+    if not isinstance(model.config, LightGBMModelConfig):
+        raise LightGBMArtifactError("fitted model config has an unsupported type")
     if model.feature_columns != expected_columns:
         raise LightGBMArtifactError("fitted model feature_columns do not match the manifest")
     if model.config.feature_spec != DEFAULT_RIDGE_FEATURE_SPEC:
@@ -412,6 +423,8 @@ def export_lightgbm_artifact(
         fitted_model = fit_lightgbm_model(training_rows, config=model_config)
     except ModelTrainingError as exc:
         raise LightGBMArtifactError(str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise LightGBMArtifactError("training data contains invalid numeric values") from exc
     provisional_manifest = LightGBMArtifactManifest(
         schema_version=ARTIFACT_SCHEMA_VERSION,
         model_name=ARTIFACT_MODEL_NAME,
@@ -494,5 +507,8 @@ def load_lightgbm_artifact(path: str | Path) -> LoadedLightGBMArtifact:
         raise LightGBMArtifactError("artifact model could not be deserialized") from exc
     if not isinstance(model, FittedLightGBMModel):
         raise LightGBMArtifactError("artifact model has an unsupported type")
-    _validate_fitted_model_contract(model, manifest=manifest)
+    try:
+        _validate_fitted_model_contract(model, manifest=manifest)
+    except (AttributeError, TypeError) as exc:
+        raise LightGBMArtifactError("artifact model contract is invalid") from exc
     return LoadedLightGBMArtifact(manifest=manifest, model=model)
