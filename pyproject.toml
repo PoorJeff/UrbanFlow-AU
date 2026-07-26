@@ -18,10 +18,12 @@ dependencies = [
     "mlflow>=3,<4",
     "pandas>=2.1,<4",
     "pandera[pandas]>=0.24,<1",
+    "plotly>=6.9,<7",
     "prefect>=3,<4",
     "psycopg[binary]>=3.2,<4",
     "scikit-learn>=1.5,<2",
     "SQLAlchemy>=2.0,<3",
+    "streamlit>=1.60,<2",
     "tenacity>=9,<10",
     "uvicorn[standard]>=0.51,<1",
 ]
