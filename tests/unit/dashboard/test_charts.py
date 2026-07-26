@@ -9,6 +9,7 @@ from urbanflow.api.schemas import (
     HistoryResponse,
 )
 from urbanflow.dashboard.charts import build_forecast_figure, build_history_figure
+from urbanflow.dashboard.time_utils import MELBOURNE_TIME_ZONE
 
 
 @pytest.fixture
@@ -58,7 +59,7 @@ def forecast() -> ForecastResponse:
     )
 
 
-def test_build_history_figure_preserves_observed_response_values_and_order(
+def test_build_history_figure_converts_to_melbourne_and_preserves_response_order(
     history: HistoryResponse,
 ) -> None:
     figure = build_history_figure(history)
@@ -66,7 +67,11 @@ def test_build_history_figure_preserves_observed_response_values_and_order(
     assert len(figure.data) == 1
     observed = figure.data[0]
     assert observed.name == "Observed"
-    assert list(observed.x) == [point.observed_at for point in history.data]
+    assert list(observed.x) == [
+        datetime(2026, 7, 12, 19, tzinfo=MELBOURNE_TIME_ZONE),
+        datetime(2026, 7, 12, 18, tzinfo=MELBOURNE_TIME_ZONE),
+    ]
+    assert all(value.tzinfo is MELBOURNE_TIME_ZONE for value in observed.x)
     assert list(observed.y) == [31, 24]
 
 
@@ -79,7 +84,11 @@ def test_build_forecast_figure_labels_and_styles_observed_and_forecast(
     assert [trace.name for trace in figure.data] == ["Observed", "Forecast"]
     observed, predicted = figure.data
     assert observed.line.dash != predicted.line.dash
-    assert list(predicted.x) == [prediction.target_at for prediction in forecast.predictions]
+    assert list(predicted.x) == [
+        datetime(2026, 7, 12, 22, tzinfo=MELBOURNE_TIME_ZONE),
+        datetime(2026, 7, 12, 21, tzinfo=MELBOURNE_TIME_ZONE),
+    ]
+    assert all(value.tzinfo is MELBOURNE_TIME_ZONE for value in predicted.x)
     assert list(predicted.y) == [12.75, 3.125]
 
 
@@ -89,5 +98,26 @@ def test_build_forecast_figure_supports_a_forecast_only_result(
     figure = build_forecast_figure(history=None, forecast=forecast)
 
     assert [trace.name for trace in figure.data] == ["Forecast"]
-    assert list(figure.data[0].x) == [prediction.target_at for prediction in forecast.predictions]
+    assert list(figure.data[0].x) == [
+        datetime(2026, 7, 12, 22, tzinfo=MELBOURNE_TIME_ZONE),
+        datetime(2026, 7, 12, 21, tzinfo=MELBOURNE_TIME_ZONE),
+    ]
     assert list(figure.data[0].y) == [12.75, 3.125]
+
+
+def test_build_history_figure_rejects_a_naive_observed_timestamp(
+    history: HistoryResponse,
+) -> None:
+    history.data[0].observed_at = datetime(2026, 7, 12, 9)
+
+    with pytest.raises(ValueError, match="Chart timestamps must be offset-aware"):
+        build_history_figure(history)
+
+
+def test_build_forecast_figure_rejects_a_naive_target_timestamp(
+    forecast: ForecastResponse,
+) -> None:
+    forecast.predictions[0].target_at = datetime(2026, 7, 12, 12)
+
+    with pytest.raises(ValueError, match="Chart timestamps must be offset-aware"):
+        build_forecast_figure(history=None, forecast=forecast)

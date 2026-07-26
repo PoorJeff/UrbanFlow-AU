@@ -42,7 +42,7 @@ def load_today_snapshot(
     history, history_error = _load_history(
         client,
         location_id=location_id,
-        end=forecast.data_cutoff_at + timedelta(microseconds=1),
+        end=_history_end_from_cutoff(forecast.data_cutoff_at),
     )
     return TodaySnapshot(forecast, None, history, history_error)
 
@@ -69,7 +69,7 @@ def load_forecast_snapshot(
     history, history_error = _load_history(
         client,
         location_id=location_id,
-        end=forecast.data_cutoff_at + timedelta(microseconds=1),
+        end=_history_end_from_cutoff(forecast.data_cutoff_at),
     )
     return ForecastSnapshot(forecast, None, history, history_error)
 
@@ -89,6 +89,12 @@ def _load_history(
         ), None
     except DashboardApiError as history_error:
         return None, history_error
+
+
+def _history_end_from_cutoff(data_cutoff_at: datetime) -> datetime:
+    if data_cutoff_at.tzinfo is None or data_cutoff_at.utcoffset() is None:
+        raise ValueError("Forecast data cutoff must be offset-aware.")
+    return data_cutoff_at + timedelta(microseconds=1)
 
 
 def _as_melbourne(value: datetime) -> datetime:

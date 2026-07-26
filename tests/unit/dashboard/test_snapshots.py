@@ -103,6 +103,16 @@ def test_today_loads_forecast_before_cutoff_aligned_history() -> None:
     assert snapshot.history_error is None
 
 
+def test_today_rejects_naive_forecast_cutoff_before_requesting_history() -> None:
+    forecast = _forecast(horizon=24, cutoff=datetime(2026, 7, 12, 10))
+    client = RecordingClient(forecast_result=forecast, history_result=None)
+
+    with pytest.raises(ValueError, match="Forecast data cutoff must be offset-aware"):
+        load_today_snapshot(client, location_id=101)
+
+    assert client.calls == [("forecast", 101, 24)]
+
+
 @pytest.mark.parametrize("error_code", FORECAST_ERROR_CODES_WITH_HISTORY_FALLBACK)
 def test_today_uses_melbourne_now_history_only_for_availability_errors(
     error_code: str,
@@ -210,6 +220,16 @@ def test_forecast_loads_cutoff_aligned_history_only_after_success() -> None:
     assert snapshot.forecast_error is None
     assert snapshot.history is history
     assert snapshot.history_error is None
+
+
+def test_forecast_rejects_naive_cutoff_before_requesting_history() -> None:
+    forecast = _forecast(horizon=2, cutoff=datetime(2026, 7, 12, 10))
+    client = RecordingClient(forecast_result=forecast, history_result=None)
+
+    with pytest.raises(ValueError, match="Forecast data cutoff must be offset-aware"):
+        load_forecast_snapshot(client, location_id=101, horizon=2)
+
+    assert client.calls == [("forecast", 101, 2)]
 
 
 def test_forecast_keeps_forecast_when_auxiliary_history_fails() -> None:
