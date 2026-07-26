@@ -241,16 +241,14 @@ def test_changing_sensor_or_dates_updates_focus_without_requesting_history() -> 
     client = RecordingClient()
     at = _run(client)
 
-    at.selectbox(key="explore_sensor_selector").select(202)
-    at = at.run()
+    selector = at.selectbox(key="explore_sensor_selector")
+    assert selector.proto.form_id == ""
+    at = selector.select(202).run()
     at.date_input(key="explore_start_date").set_value(date(2026, 4, 2))
-    at = at.run()
 
     assert _history_calls(client) == []
     assert at.session_state.filtered_state["selected_location_id"] == 202
     assert [call[0] for call in client.calls] == [
-        "health",
-        "sensors",
         "health",
         "sensors",
         "health",
@@ -299,6 +297,7 @@ def test_exact_31_elapsed_days_are_accepted() -> None:
 def test_submit_preserves_exact_offset_aware_local_midnights() -> None:
     client = RecordingClient(history=_history(empty=True))
     at = _run(client)
+    at = at.selectbox(key="explore_sensor_selector").select(202).run()
     at.date_input(key="explore_start_date").set_value(date(2026, 4, 1))
     at.date_input(key="explore_end_date").set_value(date(2026, 4, 8))
 
@@ -307,7 +306,7 @@ def test_submit_preserves_exact_offset_aware_local_midnights() -> None:
     assert _history_calls(client) == [
         (
             "history",
-            101,
+            202,
             datetime(2026, 4, 1, tzinfo=MELBOURNE_TIME_ZONE),
             datetime(2026, 4, 8, tzinfo=MELBOURNE_TIME_ZONE),
         )
@@ -412,8 +411,9 @@ def test_changing_sensor_clears_the_previous_history_output() -> None:
     assert at.dataframe
     assert at.get("plotly_chart")
 
-    at.selectbox(key="explore_sensor_selector").select(202)
-    at = at.run()
+    selector = at.selectbox(key="explore_sensor_selector")
+    assert selector.proto.form_id == ""
+    at = selector.select(202).run()
 
     assert len(_history_calls(client)) == 1
     assert at.session_state.filtered_state["selected_location_id"] == 202

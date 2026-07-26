@@ -57,15 +57,18 @@ def render_explore(client: DashboardApiClient) -> None:
     sensors_by_id = {sensor.location_id: sensor for sensor in context.sensors.data}
     end_date = melbourne_now().date()
     selector_was_initialized = "explore_sensor_selector" in st.session_state
+    location_id = st.selectbox(
+        "Active sensor",
+        options=location_ids,
+        index=initial_index,
+        format_func=lambda value: f"{sensors_by_id[value].sensor_name} (location {value})",
+        key="explore_sensor_selector",
+    )
+
+    if selector_was_initialized and location_id != selected_location_id:
+        set_selected_location_id(st.session_state, location_id)
 
     with st.form("explore_history_form"):
-        location_id = st.selectbox(
-            "Active sensor",
-            options=location_ids,
-            index=initial_index,
-            format_func=lambda value: f"{sensors_by_id[value].sensor_name} (location {value})",
-            key="explore_sensor_selector",
-        )
         start_date = st.date_input(
             "Start date",
             value=end_date - timedelta(days=7),
@@ -80,9 +83,6 @@ def render_explore(client: DashboardApiClient) -> None:
             "Load history",
             key="load_explore_history",
         )
-
-    if selector_was_initialized and location_id != selected_location_id:
-        set_selected_location_id(st.session_state, location_id)
 
     if not submitted:
         return
