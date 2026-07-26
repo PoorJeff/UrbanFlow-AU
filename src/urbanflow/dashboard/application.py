@@ -6,11 +6,27 @@ from urbanflow.dashboard.config import (
     DashboardConfigError,
     load_dashboard_config,
 )
-from urbanflow.dashboard.pages.today import render_today
+from urbanflow.dashboard.pages.explore import render_explore
+from urbanflow.dashboard.pages.today import DASHBOARD_PAGE_KEY, render_today
+
+DASHBOARD_PAGES = ("Today", "Explore")
 
 
 def create_dashboard_client(config: DashboardConfig) -> DashboardApiClient:
     return DashboardApiClient(config.api_base_url)
+
+
+def render_dashboard(client: DashboardApiClient) -> None:
+    page = st.radio(
+        "Page",
+        DASHBOARD_PAGES,
+        horizontal=True,
+        key=DASHBOARD_PAGE_KEY,
+    )
+    if page == "Explore":
+        render_explore(client)
+    else:
+        render_today(client)
 
 
 def main() -> None:
@@ -24,6 +40,6 @@ def main() -> None:
 
     client = create_dashboard_client(config)
     try:
-        render_today(client)
+        render_dashboard(client)
     finally:
         client.close()

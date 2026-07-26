@@ -25,6 +25,7 @@ from urbanflow.dashboard.snapshots import TodaySnapshot, load_today_snapshot
 from urbanflow.dashboard.time_utils import format_melbourne_timestamp
 
 FORECAST_AVAILABILITY_ERRORS = frozenset({"model_unavailable", "forecast_unavailable"})
+DASHBOARD_PAGE_KEY = "dashboard_page"
 
 
 def render_today(client: DashboardApiClient) -> None:
@@ -58,6 +59,15 @@ def render_today(client: DashboardApiClient) -> None:
         return
 
     _render_location_form(client, context.sensors.data)
+    if get_selected_location_id(st.session_state) is not None:
+        st.button(
+            "How has this location changed?",
+            on_click=_navigate_to_explore,
+        )
+
+
+def _navigate_to_explore() -> None:
+    st.session_state[DASHBOARD_PAGE_KEY] = "Explore"
 
 
 def _render_location_form(
