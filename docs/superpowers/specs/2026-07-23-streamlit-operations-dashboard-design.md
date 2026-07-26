@@ -1,18 +1,24 @@
-# Streamlit Operations Dashboard Design
+# Streamlit Guided Operations Dashboard Design
 
 **Date:** 2026-07-23
 
+**Updated:** 2026-07-26
+
 ## Goal
 
-Add the first runnable UrbanFlow AU operations dashboard. It must present only
-truthful information obtained through the existing FastAPI boundary: service
-health, sensors, their history, model evaluation metadata, and a real
-artifact-backed forecast when the API has been configured to serve one.
+Add the first runnable UrbanFlow AU guided operations dashboard. It must orient
+an operator around one selected sensor and its returned observations before
+offering deeper history and forecast investigations. All information continues
+to come only from the existing FastAPI boundary: service configuration signals,
+sensors, their history, model evaluation metadata, and a real artifact-backed
+forecast when the API has been configured to serve one.
 
-The dashboard is an operator-facing tool, not a marketing page and not a
-second data-serving implementation. It must remain useful when the local API
-is partially configured, and must never replace unavailable results with demo
-data, stale data, or a locally computed forecast.
+The dashboard is an operator-facing tool with a calm, human-centred entry
+experience, not a marketing page, explanatory AI, or a second data-serving
+implementation. It must remain useful when the local API is partially
+configured, and must never replace unavailable results with demo data, stale
+data, a locally computed forecast, or an invented explanation of pedestrian
+behaviour.
 
 ## Current context
 
@@ -30,19 +36,30 @@ UrbanFlow AU already has:
 The requirements document describes a four-page final dashboard, data-drift
 monitoring, and Docker Compose. Those capabilities are not all supported by
 the current API or operational inputs. This slice therefore establishes the
-truthful dashboard boundary and its first three operator workflows before the
+truthful dashboard boundary and its first three linked workflows before the
 separate monitoring and deployment slices.
 
 ## Decision
 
 Build a small Streamlit application that consumes the FastAPI HTTP contract
-through one typed client. The app has three pages:
+through one typed client. The app has three pages arranged as one journey:
 
-1. `Overview` for health, configured data availability, active-sensor count,
-   and optional evaluation metrics;
-2. `Sensor Explorer` for an operator-selected, bounded history query;
-3. `Forecast` for an explicitly requested 1–24 hour model forecast and its
-   recent real history.
+1. `Today` is the home page. It asks the operator to select one returned
+   sensor, then explicitly load that location's bounded observations and, when
+   available, its direct 24-hour forecast. It leads with a factual timeline,
+   then offers clear next questions rather than a wall of technical cards.
+2. `Explore` is the selected sensor's bounded history query. It pre-fills the
+   focus sensor but still lets the operator choose a different sensor and date
+   range.
+3. `Forecast` is the selected sensor's explicitly requested 1–24 hour model
+   forecast and its recent real history. It pre-fills the focus sensor but
+   never requests a forecast merely because the page was opened.
+
+`Today` owns the visual hierarchy; `Explore` and `Forecast` are its deliberate
+extensions. The only application-owned cross-page data context is
+`selected_location_id`, so that the location travels between pages. The app
+must not retain a health, sensor-list, history, forecast, metrics response, or
+plot data in session state.
 
 Use `URBANFLOW_DASHBOARD_API_BASE_URL` as the sole runtime connection setting.
 When the variable is absent, it defaults to `http://127.0.0.1:8000` for the
@@ -65,11 +82,14 @@ project's existing major-version policy.
 3. Reuse of `urbanflow.api.schemas` response models for successful response
    validation; no copy of the server contract and no import of API services,
    repositories, or model providers.
-4. The three pages and their truthful empty, unavailable, and successful
-   states.
-5. Two Plotly line charts only: selected sensor history and selected sensor
-   history plus forecast.
-6. Unit/UI tests with mocked HTTP, an offline Streamlit smoke, updated README
+4. The three linked pages and their truthful first-visit, empty, unavailable,
+   and successful states.
+5. Two Plotly line-chart forms only: selected sensor history, and selected
+   sensor history plus a separately labelled forecast trace.
+6. Deterministic factual captions derived only from response fields, visible
+   non-colour status wording, accessible control labels, and a quiet
+   data-and-model transparency area.
+7. Unit/UI tests with mocked HTTP, an offline Streamlit smoke, updated README
    instructions, and CI coverage appropriate to the new entry point.
 
 ### Explicit non-goals
@@ -83,6 +103,8 @@ project's existing major-version policy.
 - selectable model comparisons or a Seasonal Naive fallback in the UI;
 - login, write actions, polling, background refresh, caching that can hide
   current availability, or a dashboard-owned data cache;
+- generative explanations, causal claims, crowding recommendations, inferred
+  neighbourhoods, route context, confidence intervals, or a sample-data mode;
 - Docker Compose, container images, deployment, screenshots, or portfolio
   claims.
 
@@ -116,6 +138,7 @@ operator browser
 app/streamlit_app.py
       |
       +-- dashboard configuration
+      +-- focus context (selected_location_id only)
       +-- dashboard page renderers
       +-- DashboardApiClient (httpx, 5-second timeout, no retries)
                          |
@@ -131,10 +154,12 @@ app/streamlit_app.py
 `DashboardApiClient` owns URL construction, bounded HTTP calls, parsing of the
 API's `{"error": {"code", "message", "details"}}` envelope, and successful
 response validation. Page renderers receive typed results or one dashboard
-error type; they do not inspect raw `httpx.Response` objects. The application
-does not cache network responses or retain a prior query result in session
-state, so a failed current request cannot leave old data displayed as if it
-were current.
+error type; they do not inspect raw `httpx.Response` objects. The only
+application-owned cross-page data context in `st.session_state` is
+`selected_location_id`; no API response or plot data is retained there. The
+application does not cache network responses or retain a prior query result in
+session state, so a failed current request or a newly selected location cannot
+leave old data displayed as if it were current.
 
 The dashboard may import Pydantic response models from
 `urbanflow.api.schemas`, which is a contract-only module. It must not import
@@ -161,7 +186,7 @@ The client provides these methods:
 | `list_sensors(active_only=True)` | `GET /api/v1/sensors` | `SensorListResponse` | The Dashboard always uses the active-only list. |
 | `get_history(location_id, start, end)` | `GET /api/v1/sensors/{id}/history` | `HistoryResponse` | Sends ISO-8601 timestamps with offsets. |
 | `get_forecast(location_id, horizon)` | `GET /api/v1/sensors/{id}/forecast` | `ForecastResponse` | Accepts only `1..24`; preserves the API's prediction order. |
-| `get_model_metrics()` | `GET /api/v1/model/metrics` | `ModelMetricsResponse` | `503 metrics_unavailable` is optional-page information, not a fatal Overview failure. |
+| `get_model_metrics()` | `GET /api/v1/model/metrics` | `ModelMetricsResponse` | `503 metrics_unavailable` is optional transparency information, not a fatal Today-page failure. |
 
 For every other non-success response, the client attempts to parse the
 standard error envelope and raises `DashboardApiError` with the status, code,
@@ -175,44 +200,89 @@ the page body.
 
 ### Shared behavior
 
-The sidebar identifies the configured API origin and selects one of the three
-pages. Each page performs its own current request. A request is only made by a
-page render or a form submission; importing the Streamlit module performs no
-network I/O.
+A light navigation names the three pages `Today`, `Explore`, and `Forecast`.
+It identifies the configured API origin and, after a location is chosen,
+visibly names the current focus location. The persisted context is only the
+integer `selected_location_id`; a sensor list and every detailed response are
+read again when needed. If a newly returned active list no longer contains the
+persisted ID, the app clears the focus rather than repeatedly requesting an
+unknown sensor. Importing a Streamlit module performs no network I/O.
+
+Each page starts by obtaining current health and the active sensor list when
+health is not `unavailable`. Health is a configuration and availability signal,
+not proof that a database, artifact, model, or data-freshness component is
+ready: the existing default API legitimately reports `degraded` and
+`unconfigured` components. `unavailable`, a connection failure, or invalid
+health output blocks dependent requests and shows a readable state.
 
 No response is fabricated. Empty lists, empty history, nullable model
 versions, and unavailable components remain visible as such. All timestamps
 are displayed in `Australia/Melbourne` with an explicit timezone-aware source
-value retained by the client.
+value retained by the client. A selection alone never loads observations or a
+forecast; a clearly labelled form action performs the detailed request.
 
-### Overview
+### Today
 
-`Overview` obtains current health first. When the health body is
-`unavailable`, it displays that state without issuing dependent sensor or
-metrics requests. Otherwise it obtains the active sensor list and presents:
+`Today` is the first page and begins with an invitation to choose an active
+sensor returned by the API. Until a sensor is chosen and the operator submits
+`Load this location`, it shows no observations, forecast line, numeric example,
+or city-wide statement. If the active list is empty, it says that no active
+locations are currently returned and does not invent a Melbourne catalog.
 
-- overall API health and the four components (`api_process`, `data_store`,
-  `model_provider`, and `data_freshness`);
-- health generation time, data cutoff, and model version when provided;
-- the active sensor count from `SensorListResponse.meta.count`;
-- optional evaluation metadata from `/api/v1/model/metrics`: model name,
-  nullable version, MAE, RMSE, WAPE, and final test window.
+When the operator explicitly loads a selected location, the page performs a
+bounded snapshot for that one ID:
 
-`degraded` is rendered as an informative warning, not a page failure.
-`unavailable`, a connection failure, or invalid health output shows a clear
-error and prevents misleading dependent metrics. If the metrics endpoint
-returns `metrics_unavailable`, Overview remains usable and says that
-evaluation metrics are not configured.
+1. It requests the direct 24-hour forecast for the same ID.
+2. If forecast succeeds, it sets
+   `end = data_cutoff_at + timedelta(microseconds=1)` and
+   `start = end - timedelta(hours=24)`, then requests that exact offset-aware
+   history interval. This is the only history trace that may share a chart with
+   the returned forecast trace.
+3. If forecast fails with `model_unavailable` or `forecast_unavailable`, it
+   sets `end = now(Australia/Melbourne)` and
+   `start = end - timedelta(hours=24)`, then requests that exact offset-aware
+   history interval so that a returned-observations-only state remains possible.
 
-The final requirements' global "past 24-hour total" and "forecast peak"
-cards are intentionally absent. The API has no cross-sensor aggregation
-contract; making a fan-out of forecasts in the browser would be expensive,
-non-atomic, and would invent a second aggregation API. A later API slice must
-define that source before the cards are added.
+The page shows a selected-location heading, exact sensor name/description,
+and a factual timeline. A non-empty history result may state the latest
+*returned* observation and its timestamp. A successful forecast may state the
+model name/version, generation and cutoff timestamps, and the largest
+*returned* prediction with its target timestamp. It labels observed and
+forecast traces separately; forecast uses a different line style as well as a
+label.
 
-### Sensor Explorer
+If the forecast fails with `model_unavailable` or `forecast_unavailable`, the
+page may still show the independently returned history trace and a clear
+`Forecast unavailable` panel containing the API message. It shows no forecast
+trace, forecast maximum, or fallback prediction. If history fails, its panel
+states that observations could not be returned and it shows no history trace.
+If forecast succeeds but the matching history is a valid empty list, it shows
+the forecast-only trace and says that no observations were returned for the
+matching interval; it does not imply a continuous history.
+For `data_store_unavailable`, `sensor_not_found`, invalid response, or
+transport failure, the page presents the applicable availability state and
+never continues with stale output.
 
-`Sensor Explorer` first requests active sensors. With a non-empty list, a
+Below the primary result, two explicit question-style calls to action carry
+the selected ID to the other pages: `How has this location changed?` opens
+`Explore`; `What returned forecast is available next?` opens `Forecast`.
+The lower-prominence `Data and model context` area may display health
+components, health generation time, optional cutoff/model version, active
+sensor count, and a user-triggered evaluation-summary view. A
+`metrics_unavailable` result is an honest optional state. Evaluation MAE,
+RMSE, and WAPE are labelled as historical evaluation context, never as the
+current selected location's or serving forecast's accuracy.
+
+The final requirements' global total, ranking, and city-wide forecast cards
+are intentionally absent. The API has no cross-sensor aggregation contract;
+making a fan-out of forecasts in the browser would be expensive, non-atomic,
+and would invent a second aggregation API. A later API slice must define that
+source before such cards are added.
+
+### Explore
+
+`Explore` requests active sensors and pre-fills its selector from
+`selected_location_id` when the ID is still present in the returned list. A
 form lets the operator choose a sensor and an exclusive date range. The UI
 turns the selected calendar dates into `Australia/Melbourne` local-midnight
 timestamps. It requires `start < end` and an actual timezone-aware elapsed
@@ -221,12 +291,15 @@ history route. This matches the API limit even across a daylight-saving change;
 it may reject a calendar-looking 31-day range if the local offset makes that
 elapsed interval longer than 31 days.
 
+Changing a location updates `selected_location_id` but clears the current
+render's result; no plot or caption for the earlier location remains visible.
 The initial form values describe the most recent seven complete calendar days,
 but no history request happens until submission. A successful non-empty result
 is shown as a Plotly time-series line and a timestamp/count table. An empty
-result says that no observations exist in the requested interval. Sensor
-absence, `sensor_not_found`, `data_store_unavailable`, invalid range input,
-and transport failures each display their own clear state without a chart.
+result says that no observations were returned in the selected interval.
+Sensor absence, `sensor_not_found`, `data_store_unavailable`, invalid range
+input, and transport failures each display their own clear state without a
+chart.
 
 The page does not make a map, infer anomalies, calculate a missing-rate, or
 derive daily/weekly patterns. Those need a separately defined aggregation and
@@ -234,28 +307,31 @@ quality contract.
 
 ### Forecast
 
-`Forecast` uses the same active sensor list and a form containing sensor and
-integer horizon controls. The horizon accepts exactly `1..24` and defaults to
-24. Submitting the form first obtains the one direct multi-step forecast. It
-then requests the real preceding 24-hour history ending at the forecast's
-`data_cutoff_at`, using `data_cutoff_at + timedelta(microseconds=1)` as the
-end-exclusive timestamp so that an observation at the cutoff is included.
+`Forecast` requests active sensors and pre-fills its selector from
+`selected_location_id` when valid. Its form contains sensor and integer horizon
+controls. The horizon accepts exactly `1..24` and defaults to 24. Changing a
+location updates the shared focus ID and clears the current render's output.
+Opening the page or changing a selector does not request a forecast; only
+submission obtains the one direct multi-step forecast. It then requests the
+real preceding 24-hour history ending at the forecast's `data_cutoff_at`, using
+`data_cutoff_at + timedelta(microseconds=1)` as the end-exclusive timestamp so
+that an observation at the cutoff is included.
 
 On complete success, the page shows:
 
 - model name, nullable model version, generated timestamp, forecast origin,
   and data cutoff;
-- a Plotly chart containing the real historical points and returned forecast
-  points as separate traces;
+- a Plotly chart containing returned historical points and returned forecast
+  points as separately labelled, visually distinct traces;
 - a prediction table in API order;
 - the largest returned non-negative prediction and its target time.
 
 If the forecast succeeds but its auxiliary history query fails, the page may
-show the truthful forecast-only chart with a prominent note that recent
-history is unavailable; it must not substitute stale history. If forecast
-generation itself fails (`model_unavailable`, `forecast_unavailable`, storage
-failure, invalid response, or transport failure), it shows no prediction
-chart, peak, or fake fallback.
+show the truthful forecast-only chart with a prominent note that recent history
+is unavailable; it must not substitute stale history. If forecast generation
+itself fails (`model_unavailable`, `forecast_unavailable`, storage failure,
+invalid response, or transport failure), it shows no prediction chart,
+prediction maximum, or fake fallback.
 
 ## Rendering and data rules
 
@@ -266,6 +342,15 @@ chart, peak, or fake fallback.
 - Treat an empty response as a valid empty state only where the endpoint's
   contract allows it. Treat malformed model fields or prediction order as an
   invalid API response.
+- Human-centred copy is deterministic and factual. It may identify the chosen
+  sensor, a returned interval, the latest returned observation, a returned
+  forecast's highest value, or API timestamps and status. It must not call a
+  source live, fresh, accurate, busy, rising, healthy, city-wide, or causal
+  unless that exact claim is represented by the response contract.
+- Every status has visible text; colour is never its sole carrier. Chart traces
+  have a visible legend and labels, and observed and forecast values use
+  distinct line styles in addition to colour. Controls have explicit labels
+  and charts keep a readable timestamp/count table alternative.
 - Do not use `st.cache_data`, polling, hidden reruns, local CSV fallbacks, or
   a sample-data mode.
 - Page code stays compact: data parsing and request errors belong in the API
@@ -282,14 +367,22 @@ artifact directory, MLflow server, running FastAPI process, or Melbourne API.
    contracts, health's valid `503 unavailable` body, standard error envelopes,
    timeouts/connection errors, non-JSON errors, and malformed success payloads.
 3. Page/rendering tests use the mocked client and Streamlit's supported test
-   harness. They cover Overview `ok`, `degraded`, `unavailable`, and metrics
-   unavailable states; sensor-list/history empty and error states; history
-   range boundary validation; forecast horizon boundaries, ordered output,
-   auxiliary-history failure, model unavailable, and unavailable storage.
-4. A bounded headless Streamlit smoke verifies the entry point starts without
+   harness. They cover Today first-visit guidance, empty catalog, `degraded`,
+   `unavailable`, explicit selected-location loading, returned history plus
+   forecast, forecast plus a valid empty history, history-only model-unavailable,
+   metrics unavailable, and no stale location content after a selector change.
+   They also cover sensor-list and
+   history empty/error states; history range boundary validation; focus-context
+   prefill on Explore and Forecast; forecast horizon boundaries, ordered
+   output, auxiliary-history failure, model unavailable, and unavailable
+   storage.
+4. Rendering assertions cover factual captions, visible text for non-success
+   states, labelled controls, and non-colour-only observed-versus-forecast
+   distinction.
+5. A bounded headless Streamlit smoke verifies the entry point starts without
    connecting to an API on module import. It must be stopped and checked for a
    ready server within a fixed timeout.
-5. The full project Ruff check, Ruff format check, pytest suite, and existing
+6. The full project Ruff check, Ruff format check, pytest suite, and existing
    bounded Uvicorn health smoke stay required. CI receives only deterministic,
    local checks.
 
@@ -305,7 +398,8 @@ README will document this local sequence:
    environment.
 
 It will state that an unconfigured API intentionally yields empty/degraded
-Dashboard states, that real forecasts require the existing API configuration,
+Dashboard states, that users first choose one returned location before loading
+its observations, that real forecasts require the existing API configuration,
 and that the dashboard is an initial non-production operations boundary.
 
 ## Acceptance criteria
@@ -316,13 +410,22 @@ This slice is complete when:
   Streamlit user session performs only the page's documented current request;
 - every dashboard value is sourced from a current FastAPI response and the
   UI never shows synthetic or stale predictions;
-- Overview accurately renders health and optional metrics behavior;
-- Sensor Explorer validates and sends timezone-aware elapsed intervals of no
+- Today guides a first-time user to choose a returned location, makes detailed
+  requests only after explicit submission, and renders truthful history,
+  forecast, and unavailable combinations without a fabricated number or
+  explanation;
+- `selected_location_id` travels from Today to Explore and Forecast, while
+  response data never travels through session state and a changed location
+  cannot leave an earlier location's result visible;
+- data and model context accurately renders health as a configuration signal
+  and treats optional metrics as evaluation context rather than serving
+  accuracy;
+- Explore validates and sends timezone-aware elapsed intervals of no
   more than 31 days, then renders only returned history;
 - Forecast validates `1..24`, renders API-order direct forecasts, and
   truthfully distinguishes a missing model from missing auxiliary history;
 - normal errors are readable availability/configuration messages, not a
-  silent empty chart or an uncaught traceback;
+  silent empty chart, colour-only signal, or an uncaught traceback;
 - tests are fully mocked/offline, quality gates pass, and CI remains green;
 - README gives an operator a reproducible API-plus-Dashboard startup path;
 - no dashboard code introduces a model fallback, a direct data connection,
