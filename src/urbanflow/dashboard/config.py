@@ -26,10 +26,29 @@ def load_dashboard_config(
         return DashboardConfig(api_base_url=DEFAULT_API_BASE_URL)
 
     api_base_url = values[DASHBOARD_API_BASE_URL_ENV_VAR].strip()
-    parsed_url = urlsplit(api_base_url)
-    if not api_base_url or parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+    try:
+        parsed_url = urlsplit(api_base_url)
+        _ = parsed_url.port
+    except ValueError as exc:
         raise DashboardConfigError(
-            f"{DASHBOARD_API_BASE_URL_ENV_VAR} must be an HTTP(S) URL with a host."
+            f"{DASHBOARD_API_BASE_URL_ENV_VAR} must be a valid HTTP(S) origin."
+        ) from exc
+
+    if (
+        not api_base_url
+        or parsed_url.scheme not in {"http", "https"}
+        or not parsed_url.hostname
+        or parsed_url.netloc.endswith(":")
+        or parsed_url.path.strip("/")
+        or parsed_url.query
+        or "?" in api_base_url
+        or parsed_url.fragment
+        or "#" in api_base_url
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+    ):
+        raise DashboardConfigError(
+            f"{DASHBOARD_API_BASE_URL_ENV_VAR} must be a valid HTTP(S) origin."
         )
 
     return DashboardConfig(api_base_url=api_base_url.rstrip("/"))
