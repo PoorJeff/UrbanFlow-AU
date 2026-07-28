@@ -2,6 +2,7 @@ import streamlit as st
 
 from urbanflow.dashboard.client import DashboardApiClient
 from urbanflow.dashboard.config import (
+    DEFAULT_API_BASE_URL,
     DashboardConfig,
     DashboardConfigError,
     load_dashboard_config,
@@ -17,7 +18,12 @@ def create_dashboard_client(config: DashboardConfig) -> DashboardApiClient:
     return DashboardApiClient(config.api_base_url)
 
 
-def render_dashboard(client: DashboardApiClient) -> None:
+def render_dashboard(
+    client: DashboardApiClient,
+    *,
+    api_origin: str = DEFAULT_API_BASE_URL,
+) -> None:
+    st.caption(f"API origin: {api_origin}")
     page = st.radio(
         "Page",
         DASHBOARD_PAGES,
@@ -43,6 +49,6 @@ def main() -> None:
 
     client = create_dashboard_client(config)
     try:
-        render_dashboard(client)
+        render_dashboard(client, api_origin=config.api_base_url)
     finally:
         client.close()

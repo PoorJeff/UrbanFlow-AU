@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -22,7 +22,9 @@ from urbanflow.api.schemas import (
     SensorListResponse,
     SensorResponse,
 )
+from urbanflow.dashboard.config import DEFAULT_API_BASE_URL, load_dashboard_config
 from urbanflow.dashboard.errors import DashboardApiError
+from urbanflow.dashboard.time_utils import format_melbourne_timestamp
 
 
 def _error(code: str, message: str | None = None) -> DashboardApiError:
@@ -69,9 +71,22 @@ def _sensors(*location_ids: int) -> SensorListResponse:
     )
 
 
-def _forecast(location_id: int = 101, *, horizon: int = 24) -> ForecastResponse:
+def _forecast(
+    location_id: int = 101,
+    *,
+    horizon: int = 24,
+    predicted_counts: list[float] | None = None,
+) -> ForecastResponse:
     cutoff = datetime(2026, 7, 12, 10, tzinfo=UTC)
-    predicted_counts = [12.5, 18.0, *([10.0] * max(0, horizon - 2))][:horizon]
+    returned_counts = (
+        predicted_counts
+        if predicted_counts is not None
+        else [
+            12.5,
+            18.0,
+            *([10.0] * max(0, horizon - 2)),
+        ][:horizon]
+    )
     return ForecastResponse(
         location_id=location_id,
         model_name="lightgbm",
@@ -86,7 +101,7 @@ def _forecast(location_id: int = 101, *, horizon: int = 24) -> ForecastResponse:
                 target_at=cutoff + timedelta(hours=index),
                 predicted_count=count,
             )
-            for index, count in enumerate(predicted_counts, start=1)
+            for index, count in enumerate(returned_counts, start=1)
         ],
     )
 
@@ -190,6 +205,15 @@ def _today_harness(client):
     render_today(client)
 
 
+def _dashboard_harness(client, api_origin=None):
+    from urbanflow.dashboard.application import render_dashboard
+
+    if api_origin is None:
+        render_dashboard(client)
+    else:
+        render_dashboard(client, api_origin=api_origin)
+
+
 def _run(client: RecordingClient) -> AppTest:
     return AppTest.from_function(_today_harness, args=(client,)).run()
 
@@ -223,10 +247,18 @@ def _click(at: AppTest, key: str) -> AppTest:
     return at.button(key=key).click().run()
 
 
+def _click_label(at: AppTest, label: str) -> AppTest:
+    return next(button for button in at.button if button.label == label).click().run()
+
+
 def _plotly_spec(at: AppTest) -> dict[str, Any]:
     charts = at.get("plotly_chart")
     assert len(charts) == 1
     return json.loads(charts[0].proto.spec)
+
+
+def _dataframe_with_columns(at: AppTest, columns: list[str]):
+    return next(frame for frame in at.dataframe if list(frame.value.columns) == columns)
 
 
 def test_first_visit_is_guided_and_requests_only_context() -> None:
@@ -347,8 +379,15 @@ def test_submit_renders_full_current_response_and_no_response_session_state() ->
     assert "model-v1" in text
     assert "Generated at" in text
     assert "Data cutoff" in text
-    assert len(at.dataframe) == 1
-    assert list(at.dataframe[0].value.columns) == ["Observed at", "Pedestrian count"]
+    history_frame = _dataframe_with_columns(at, ["Observed at", "Pedestrian count"])
+    assert history_frame.value["Pedestrian count"].tolist() == [24, 31]
+    prediction_frame = _dataframe_with_columns(at, ["Target at", "Predicted count"])
+    assert prediction_frame.value["Predicted count"].tolist() == [
+        prediction.predicted_count for prediction in _forecast().predictions
+    ]
+    assert prediction_frame.value["Target at"].tolist() == [
+        format_melbourne_timestamp(prediction.target_at) for prediction in _forecast().predictions
+    ]
 
     spec = _plotly_spec(at)
     assert [trace["name"] for trace in spec["data"]] == ["Observed", "Forecast"]
@@ -372,7 +411,10 @@ def test_forecast_with_empty_history_is_explicitly_forecast_only() -> None:
 
     text = _visible_text(at)
     assert "No observations were returned for the matching interval." in text
-    assert not at.dataframe
+    prediction_frame = _dataframe_with_columns(at, ["Target at", "Predicted count"])
+    assert prediction_frame.value["Predicted count"].tolist() == [
+        prediction.predicted_count for prediction in _forecast().predictions
+    ]
     spec = _plotly_spec(at)
     assert [trace["name"] for trace in spec["data"]] == ["Forecast"]
     assert "Largest returned prediction" in text
@@ -400,7 +442,10 @@ def test_history_failure_is_visible_and_never_removes_current_forecast() -> None
     text = _visible_text(at)
     assert "Observations unavailable" in text
     assert "Observations request failed." in text
-    assert not at.dataframe
+    prediction_frame = _dataframe_with_columns(at, ["Target at", "Predicted count"])
+    assert prediction_frame.value["Predicted count"].tolist() == [
+        prediction.predicted_count for prediction in _forecast().predictions
+    ]
     spec = _plotly_spec(at)
     assert [trace["name"] for trace in spec["data"]] == ["Forecast"]
     assert "Largest returned prediction" in text
@@ -419,6 +464,89 @@ def test_other_forecast_error_is_visible_without_history_or_fallback() -> None:
     assert "Largest returned prediction" not in text
     assert not at.dataframe
     assert not at.get("plotly_chart")
+
+
+def test_largest_prediction_preserves_returned_float_precision() -> None:
+    largest_value = 9876.54321098765
+    forecast = _forecast(predicted_counts=[0.123456789012345, largest_value])
+    client = RecordingClient(forecast=forecast)
+
+    at = _click(_run(client), "load_today_location")
+
+    assert (
+        f"Largest returned prediction: {largest_value} pedestrians at "
+        f"{format_melbourne_timestamp(forecast.predictions[-1].target_at)}."
+    ) in _visible_text(at)
+
+
+def test_dashboard_displays_default_and_validated_custom_api_origins() -> None:
+    default_at = AppTest.from_function(
+        _dashboard_harness,
+        args=(RecordingClient(),),
+    ).run()
+    custom_origin = load_dashboard_config(
+        {"URBANFLOW_DASHBOARD_API_BASE_URL": "https://dashboard.example/"}
+    ).api_base_url
+    custom_at = AppTest.from_function(
+        _dashboard_harness,
+        args=(RecordingClient(), custom_origin),
+    ).run()
+
+    assert f"API origin: {DEFAULT_API_BASE_URL}" in _visible_text(default_at)
+    assert "API origin: https://dashboard.example" in _visible_text(custom_at)
+
+
+def test_today_result_does_not_cross_into_explore_and_explore_loads_fresh_history() -> None:
+    client = RecordingClient()
+    at = AppTest.from_function(_dashboard_harness, args=(client,)).run()
+
+    at = _click(at, "load_today_location")
+    assert "Largest returned prediction" in _visible_text(at)
+    assert len(at.dataframe) == 2
+
+    at = _click_label(at, "How has this location changed?")
+
+    text = _visible_text(at)
+    assert "Explore" in text
+    assert "Largest returned prediction" not in text
+    assert "Latest returned observation" not in text
+    assert not at.dataframe
+    assert not at.get("plotly_chart")
+    assert [call[0] for call in client.calls] == [
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "forecast",
+        "history",
+        "health",
+        "sensors",
+    ]
+
+    at = _click(at, "load_explore_history")
+
+    assert [call[0] for call in client.calls] == [
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "forecast",
+        "history",
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "history",
+    ]
+    assert client.calls[-1][1] == 101
+    assert "Observed history" in _visible_text(at)
+    assert _dataframe_with_columns(at, ["Observed at", "Pedestrian count"]).value[
+        "Pedestrian count"
+    ].tolist() == [24, 31]
+    assert all(
+        isinstance(value, (bool, int, float, str, date, type(None)))
+        for value in at.session_state.filtered_state.values()
+    )
 
 
 def test_metrics_are_requested_only_by_explicit_historical_evaluation_action() -> None:

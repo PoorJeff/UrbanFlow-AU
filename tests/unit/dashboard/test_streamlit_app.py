@@ -65,12 +65,18 @@ def test_main_creates_one_client_and_closes_it_after_render(monkeypatch) -> None
 
     monkeypatch.setattr(application, "create_dashboard_client", create)
     monkeypatch.setattr(
-        application, "render_today", lambda received: calls.append(("render", received))
+        application,
+        "render_dashboard",
+        lambda received, *, api_origin: calls.append(("render", received, api_origin)),
     )
 
     application.main()
 
-    assert calls == [("create", config), ("render", client), "close"]
+    assert calls == [
+        ("create", config),
+        ("render", client, "https://dashboard.example"),
+        "close",
+    ]
 
 
 def test_main_closes_client_when_render_raises(monkeypatch) -> None:
@@ -90,10 +96,10 @@ def test_main_closes_client_when_render_raises(monkeypatch) -> None:
     )
     monkeypatch.setattr(application, "create_dashboard_client", lambda config: Client())
 
-    def fail_render(client: Client) -> None:
+    def fail_render(client: Client, *, api_origin: str) -> None:
         raise RuntimeError("render failed")
 
-    monkeypatch.setattr(application, "render_today", fail_render)
+    monkeypatch.setattr(application, "render_dashboard", fail_render)
 
     try:
         application.main()

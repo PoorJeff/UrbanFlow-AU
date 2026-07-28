@@ -162,6 +162,7 @@ def _render_forecast_with_history(
         _render_history_table(history)
 
     _render_forecast_details(forecast)
+    _render_prediction_table(forecast)
 
 
 def _render_history(
@@ -216,8 +217,23 @@ def _render_forecast_details(forecast: ForecastResponse) -> None:
     largest = max(forecast.predictions, key=lambda prediction: prediction.predicted_count)
     st.write(
         "Largest returned prediction: "
-        f"{largest.predicted_count:g} pedestrians at "
+        f"{largest.predicted_count} pedestrians at "
         f"{format_melbourne_timestamp(largest.target_at)}."
+    )
+
+
+def _render_prediction_table(forecast: ForecastResponse) -> None:
+    st.subheader("Returned prediction table")
+    st.dataframe(
+        [
+            {
+                "Target at": format_melbourne_timestamp(prediction.target_at),
+                "Predicted count": prediction.predicted_count,
+            }
+            for prediction in forecast.predictions
+        ],
+        width="stretch",
+        hide_index=True,
     )
 
 
