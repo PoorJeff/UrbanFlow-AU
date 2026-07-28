@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import select
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,18 @@ def test_health_status_rejects_200_with_incomplete_slow_headers() -> None:
     with _loopback_server(_SlowIncompleteHeadersHandler) as port:
         start = time.monotonic()
         deadline = start + 0.2
+
+        assert _health_status(port, deadline=deadline) is None
+        assert time.monotonic() <= deadline + 0.1
+
+
+def test_health_status_returns_none_when_peer_resets_connection() -> None:
+    if not hasattr(socket, "SO_LINGER"):
+        pytest.skip("SO_LINGER is required to force an abortive close")
+
+    with _abortive_loopback_server() as port:
+        start = time.monotonic()
+        deadline = start + 0.5
 
         assert _health_status(port, deadline=deadline) is None
         assert time.monotonic() <= deadline + 0.1
@@ -147,6 +160,53 @@ def _loopback_server(
         assert not thread.is_alive()
 
 
+@contextmanager
+def _abortive_loopback_server() -> Iterator[int]:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.settimeout(1.0)
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+
+    cleanup_started = threading.Event()
+    server_errors: list[BaseException] = []
+
+    def reset_after_request() -> None:
+        try:
+            connection, _address = listener.accept()
+            with connection:
+                connection.settimeout(1.0)
+                request = bytearray()
+                while not request.endswith(b"\r\n\r\n"):
+                    chunk = connection.recv(1024)
+                    if not chunk:
+                        raise AssertionError("health client closed before sending its request")
+                    request.extend(chunk)
+                linger_format = "HH" if sys.platform == "win32" else "ii"
+                connection.setsockopt(
+                    socket.SOL_SOCKET,
+                    socket.SO_LINGER,
+                    struct.pack(linger_format, 1, 0),
+                )
+        except OSError as exc:
+            if not cleanup_started.is_set():
+                server_errors.append(exc)
+        except BaseException as exc:
+            server_errors.append(exc)
+
+    thread = threading.Thread(target=reset_after_request)
+    thread.start()
+    try:
+        yield int(listener.getsockname()[1])
+    finally:
+        cleanup_started.set()
+        listener.close()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert not server_errors
+
+
 class _HealthyHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path != "/_stcore/health":
@@ -197,52 +257,55 @@ def _available_loopback_port() -> int:
 def _health_status(port: int, *, deadline: float) -> int | None:
     request = b"GET /_stcore/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as health_socket:
-        health_socket.setblocking(False)
-        connect_error = health_socket.connect_ex(("127.0.0.1", port))
-        if connect_error:
-            if not _wait_for_socket(
-                health_socket,
-                writable=True,
-                deadline=deadline,
-            ):
-                return None
-            if health_socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as health_socket:
+            health_socket.setblocking(False)
+            connect_error = health_socket.connect_ex(("127.0.0.1", port))
+            if connect_error:
+                if not _wait_for_socket(
+                    health_socket,
+                    writable=True,
+                    deadline=deadline,
+                ):
+                    return None
+                if health_socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR):
+                    return None
+
+            if time.monotonic() > deadline:
                 return None
 
-        if time.monotonic() > deadline:
-            return None
+            sent = 0
+            while sent < len(request):
+                if not _wait_for_socket(
+                    health_socket,
+                    writable=True,
+                    deadline=deadline,
+                ):
+                    return None
+                try:
+                    sent += health_socket.send(request[sent:])
+                except BlockingIOError:
+                    continue
 
-        sent = 0
-        while sent < len(request):
-            if not _wait_for_socket(
-                health_socket,
-                writable=True,
-                deadline=deadline,
-            ):
-                return None
-            try:
-                sent += health_socket.send(request[sent:])
-            except BlockingIOError:
-                continue
-
-        response_headers = bytearray()
-        while not response_headers.endswith(b"\r\n\r\n"):
-            if len(response_headers) >= MAX_HEALTH_HEADER_BYTES:
-                return None
-            if not _wait_for_socket(
-                health_socket,
-                readable=True,
-                deadline=deadline,
-            ):
-                return None
-            try:
-                chunk = health_socket.recv(1)
-            except BlockingIOError:
-                continue
-            if not chunk:
-                return None
-            response_headers.extend(chunk)
+            response_headers = bytearray()
+            while not response_headers.endswith(b"\r\n\r\n"):
+                if len(response_headers) >= MAX_HEALTH_HEADER_BYTES:
+                    return None
+                if not _wait_for_socket(
+                    health_socket,
+                    readable=True,
+                    deadline=deadline,
+                ):
+                    return None
+                try:
+                    chunk = health_socket.recv(1)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    return None
+                response_headers.extend(chunk)
+    except OSError:
+        return None
 
     if time.monotonic() > deadline:
         return None
