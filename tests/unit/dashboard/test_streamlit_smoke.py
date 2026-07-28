@@ -78,6 +78,29 @@ def test_health_status_returns_none_when_peer_resets_connection() -> None:
         assert time.monotonic() <= deadline + 0.1
 
 
+def test_abortive_loopback_server_requires_a_complete_health_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not hasattr(socket, "SO_LINGER"):
+        pytest.skip("SO_LINGER is required to force an abortive close")
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_health_status",
+        lambda _port, *, deadline: None,
+    )
+
+    start = time.monotonic()
+    with pytest.raises(
+        AssertionError,
+        match="did not receive a complete health request",
+    ):
+        with _abortive_loopback_server() as port:
+            assert _health_status(port, deadline=start + 0.1) is None
+
+    assert time.monotonic() - start <= 1.0 + CLEANUP_SLACK_SECONDS
+
+
 def test_health_status_does_not_read_slow_response_body() -> None:
     with _loopback_server(_SlowUnavailableBodyHandler) as port:
         deadline = time.monotonic() + 0.2
@@ -170,6 +193,8 @@ def _abortive_loopback_server() -> Iterator[int]:
     listener.listen()
 
     cleanup_started = threading.Event()
+    request_received = threading.Event()
+    reset_configured = threading.Event()
     server_errors: list[BaseException] = []
 
     def reset_after_request() -> None:
@@ -183,12 +208,14 @@ def _abortive_loopback_server() -> Iterator[int]:
                     if not chunk:
                         raise AssertionError("health client closed before sending its request")
                     request.extend(chunk)
+                request_received.set()
                 linger_format = "HH" if sys.platform == "win32" else "ii"
                 connection.setsockopt(
                     socket.SOL_SOCKET,
                     socket.SO_LINGER,
                     struct.pack(linger_format, 1, 0),
                 )
+                reset_configured.set()
         except OSError as exc:
             if not cleanup_started.is_set():
                 server_errors.append(exc)
@@ -205,6 +232,8 @@ def _abortive_loopback_server() -> Iterator[int]:
         thread.join(timeout=5)
         assert not thread.is_alive()
         assert not server_errors
+        assert request_received.is_set(), "did not receive a complete health request"
+        assert reset_configured.is_set(), "did not configure abortive SO_LINGER"
 
 
 class _HealthyHandler(BaseHTTPRequestHandler):
