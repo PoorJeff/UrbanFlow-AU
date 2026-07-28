@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[3]
 ENTRYPOINT = ROOT / "app" / "streamlit_app.py"
 STARTUP_TIMEOUT_SECONDS = 15.0
 POLL_INTERVAL_SECONDS = 0.1
+CLEANUP_SLACK_SECONDS = 1.0
+MAX_HEALTH_HEADER_BYTES = 16 * 1024
 
 
 def test_streamlit_server_starts_offline_and_reports_healthy() -> None:
@@ -28,6 +30,7 @@ def test_streamlit_server_starts_offline_and_reports_healthy() -> None:
         _streamlit_command(port),
         port=port,
         deadline=deadline,
+        timeout_seconds=STARTUP_TIMEOUT_SECONDS,
     )
 
 
@@ -45,30 +48,50 @@ def test_streamlit_startup_rejects_health_from_another_listener() -> None:
                 _streamlit_command(port),
                 port=port,
                 deadline=deadline,
+                timeout_seconds=3.0,
             )
 
-        assert time.monotonic() <= deadline
+        assert time.monotonic() - start <= 3.0 + CLEANUP_SLACK_SECONDS
 
     assert _smoke_log_paths() == logs_before
 
 
-def test_streamlit_startup_obeys_total_deadline_for_slow_response() -> None:
-    logs_before = _smoke_log_paths()
-
-    with _loopback_server(_SlowUnavailableHandler) as port:
+def test_health_status_rejects_200_with_incomplete_slow_headers() -> None:
+    with _loopback_server(_SlowIncompleteHeadersHandler) as port:
         start = time.monotonic()
         deadline = start + 0.2
-        with pytest.raises(
-            AssertionError,
-            match=r"exited before becoming ready|did not report healthy",
-        ):
-            _assert_streamlit_server_starts(
-                [sys.executable, "-c", "import time; time.sleep(0.5)"],
-                port=port,
-                deadline=deadline,
-            )
 
-        assert time.monotonic() - start < 1.0
+        assert _health_status(port, deadline=deadline) is None
+        assert time.monotonic() <= deadline + 0.1
+
+
+def test_health_status_does_not_read_slow_response_body() -> None:
+    with _loopback_server(_SlowUnavailableBodyHandler) as port:
+        deadline = time.monotonic() + 0.2
+
+        assert _health_status(port, deadline=deadline) == 503
+        assert time.monotonic() <= deadline
+
+
+def test_streamlit_startup_obeys_deadline_with_bounded_cleanup() -> None:
+    logs_before = _smoke_log_paths()
+    polling_budget = 0.2
+
+    port = _available_loopback_port()
+    start = time.monotonic()
+    deadline = start + polling_budget
+    with pytest.raises(
+        AssertionError,
+        match=r"did not report healthy within 0\.2 seconds",
+    ):
+        _assert_streamlit_server_starts(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            port=port,
+            deadline=deadline,
+            timeout_seconds=polling_budget,
+        )
+
+    assert time.monotonic() - start <= polling_budget + CLEANUP_SLACK_SECONDS
 
     assert _smoke_log_paths() == logs_before
 
@@ -139,17 +162,25 @@ class _HealthyHandler(BaseHTTPRequestHandler):
         pass
 
 
-class _SlowUnavailableHandler(BaseHTTPRequestHandler):
+class _SlowIncompleteHeadersHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        body = b"x" * 20
+        self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+        self.wfile.flush()
+        time.sleep(0.5)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+class _SlowUnavailableBodyHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
         self.send_response(503)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", "1")
         self.end_headers()
+        self.wfile.flush()
+        time.sleep(0.5)
         try:
-            for byte in body:
-                self.wfile.write(bytes([byte]))
-                self.wfile.flush()
-                time.sleep(0.1)
+            self.wfile.write(b"x")
         except OSError:
             pass
 
@@ -179,6 +210,9 @@ def _health_status(port: int, *, deadline: float) -> int | None:
             if health_socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR):
                 return None
 
+        if time.monotonic() > deadline:
+            return None
+
         sent = 0
         while sent < len(request):
             if not _wait_for_socket(
@@ -192,9 +226,9 @@ def _health_status(port: int, *, deadline: float) -> int | None:
             except BlockingIOError:
                 continue
 
-        status_line = bytearray()
-        while not status_line.endswith(b"\r\n"):
-            if len(status_line) > 4096:
+        response_headers = bytearray()
+        while not response_headers.endswith(b"\r\n\r\n"):
+            if len(response_headers) >= MAX_HEALTH_HEADER_BYTES:
                 return None
             if not _wait_for_socket(
                 health_socket,
@@ -208,11 +242,12 @@ def _health_status(port: int, *, deadline: float) -> int | None:
                 continue
             if not chunk:
                 return None
-            status_line.extend(chunk)
+            response_headers.extend(chunk)
 
     if time.monotonic() > deadline:
         return None
     try:
+        status_line = response_headers.partition(b"\r\n")[0]
         protocol, status, _reason = status_line.decode("ascii").split(" ", 2)
         if not protocol.startswith("HTTP/"):
             return None
@@ -266,6 +301,7 @@ def _assert_streamlit_server_starts(
     *,
     port: int,
     deadline: float,
+    timeout_seconds: float,
 ) -> None:
     process: subprocess.Popen[bytes] | None = None
     failure: str | None = None
@@ -300,9 +336,7 @@ def _assert_streamlit_server_starts(
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                failure = (
-                    f"Streamlit did not report healthy within {STARTUP_TIMEOUT_SECONDS:g} seconds."
-                )
+                failure = f"Streamlit did not report healthy within {timeout_seconds:g} seconds."
                 break
 
             attempt_deadline = min(deadline, time.monotonic() + 0.25)
