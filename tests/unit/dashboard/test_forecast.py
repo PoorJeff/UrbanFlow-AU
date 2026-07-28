@@ -69,9 +69,14 @@ def _sensors(*location_ids: int) -> SensorListResponse:
 def _forecast(
     location_id: int = 101,
     *,
+    horizon: int = 24,
     model_version: str | None = "model-v1",
+    predicted_counts: list[float] | None = None,
+    target_hour_offsets: list[int] | None = None,
 ) -> ForecastResponse:
     cutoff = datetime(2026, 7, 12, 10, tzinfo=UTC)
+    counts = predicted_counts or [float(index) for index in range(1, horizon + 1)]
+    offsets = target_hour_offsets or list(range(1, horizon + 1))
     return ForecastResponse(
         location_id=location_id,
         model_name="lightgbm",
@@ -79,23 +84,14 @@ def _forecast(
         generated_at=cutoff + timedelta(minutes=5),
         forecast_origin_at=cutoff + timedelta(minutes=30),
         data_cutoff_at=cutoff,
-        horizon_hours=3,
+        horizon_hours=horizon,
         predictions=[
             ForecastPredictionResponse(
-                forecast_horizon=1,
-                target_at=cutoff + timedelta(hours=3),
-                predicted_count=12.5,
-            ),
-            ForecastPredictionResponse(
-                forecast_horizon=2,
-                target_at=cutoff + timedelta(hours=2),
-                predicted_count=27.0,
-            ),
-            ForecastPredictionResponse(
-                forecast_horizon=3,
-                target_at=cutoff + timedelta(hours=1),
-                predicted_count=18.25,
-            ),
+                forecast_horizon=index,
+                target_at=cutoff + timedelta(hours=offset),
+                predicted_count=count,
+            )
+            for index, (offset, count) in enumerate(zip(offsets, counts, strict=True), start=1)
         ],
     )
 
@@ -132,7 +128,7 @@ class RecordingClient:
     ) -> None:
         self.health = health if health is not None else _health()
         self.sensors = sensors if sensors is not None else _sensors(101, 202)
-        self.forecast = forecast if forecast is not None else _forecast()
+        self.forecast = forecast
         self.history = history if history is not None else _history()
         self.calls: list[tuple[Any, ...]] = []
 
@@ -152,6 +148,8 @@ class RecordingClient:
 
     def get_forecast(self, location_id: int, *, horizon: int) -> ForecastResponse:
         self.calls.append(("forecast", location_id, horizon))
+        if self.forecast is None:
+            return _forecast(location_id, horizon=horizon)
         return self._return_or_raise(self.forecast)
 
     def get_history(
@@ -265,6 +263,22 @@ def test_focus_prefills_only_from_the_current_active_catalog() -> None:
     assert "selected_location_id" not in stale_at.session_state.filtered_state
 
 
+def test_catalog_refresh_clears_removed_initialized_focus_without_defaulting() -> None:
+    client = RecordingClient()
+    at = AppTest.from_function(_forecast_harness, args=(client,))
+    at.session_state["selected_location_id"] = 202
+    at = at.run()
+    assert at.selectbox(key="forecast_sensor_selector").value == 202
+
+    client.sensors = _sensors(101)
+    at = at.run()
+
+    assert at.selectbox(key="forecast_sensor_selector").value == 101
+    assert "selected_location_id" not in at.session_state.filtered_state
+    assert _forecast_calls(client) == []
+    assert _history_calls(client) == []
+
+
 def test_sensor_and_horizon_changes_never_request_forecast_without_submit() -> None:
     client = RecordingClient()
     at = _run(client)
@@ -327,9 +341,17 @@ def test_submit_loads_forecast_once_then_exact_cutoff_aligned_history() -> None:
 
 
 def test_full_success_renders_factual_metadata_ordered_tables_and_labelled_chart() -> None:
-    client = RecordingClient()
+    client = RecordingClient(
+        forecast=_forecast(
+            horizon=3,
+            predicted_counts=[12.5, 27.0, 18.25],
+            target_hour_offsets=[3, 2, 1],
+        )
+    )
+    at = _run(client)
+    at.number_input(key="forecast_horizon").set_value(3)
 
-    at = _submit(_run(client))
+    at = _submit(at)
 
     text = _visible_text(at)
     assert "Sensor 101" in text
@@ -338,7 +360,7 @@ def test_full_success_renders_factual_metadata_ordered_tables_and_labelled_chart
     assert "Generated at:" in text
     assert "Forecast origin:" in text
     assert "Data cutoff:" in text
-    assert "Largest returned prediction: 27 pedestrians at 12 Jul 2026, 22:00 AEST." in text
+    assert "Largest returned prediction: 27.0 pedestrians at 12 Jul 2026, 22:00 AEST." in text
     assert "Observed values use a solid line. Forecast values use a dashed line." in text
 
     history_table = _dataframe_with_columns(
@@ -368,6 +390,23 @@ def test_full_success_renders_factual_metadata_ordered_tables_and_labelled_chart
         "2026-07-12T21:00:00+10:00",
     ]
     assert chart["data"][1]["y"] == [12.5, 27.0, 18.25]
+
+
+def test_largest_prediction_preserves_high_precision_api_value() -> None:
+    client = RecordingClient(
+        forecast=_forecast(
+            horizon=1,
+            predicted_counts=[12.3456789],
+        )
+    )
+    at = _run(client)
+    at.number_input(key="forecast_horizon").set_value(1)
+
+    at = _submit(at)
+
+    assert (
+        "Largest returned prediction: 12.3456789 pedestrians at 12 Jul 2026, 21:00 AEST."
+    ) in _visible_text(at)
 
 
 def test_nullable_model_version_is_reported_without_invention() -> None:
@@ -486,10 +525,16 @@ def test_success_never_caches_responses_figures_tables_or_metrics_in_state() -> 
 def test_today_question_navigates_to_forecast_with_only_selected_id() -> None:
     client = RecordingClient()
     at = AppTest.from_function(_dashboard_harness, args=(client,))
-    at.session_state["selected_location_id"] = 202
     at = at.run()
 
     assert at.radio(key="dashboard_page").options == ["Today", "Explore", "Forecast"]
+    at = at.button(key="load_today_location").click().run()
+    assert at.session_state.filtered_state["selected_location_id"] == 101
+    assert _forecast_calls(client) == [("forecast", 101, 24)]
+    assert len(_history_calls(client)) == 1
+    assert at.dataframe
+    assert at.get("plotly_chart")
+
     action = "What returned forecast is available next?"
     assert action in _visible_text(at)
 
@@ -497,13 +542,16 @@ def test_today_question_navigates_to_forecast_with_only_selected_id() -> None:
 
     assert at.title[0].value == "Forecast"
     assert at.radio(key="dashboard_page").value == "Forecast"
-    assert at.selectbox(key="forecast_sensor_selector").value == 202
-    assert _forecast_calls(client) == []
-    assert _history_calls(client) == []
+    assert at.selectbox(key="forecast_sensor_selector").value == 101
+    assert client.calls[-2:] == [("health",), ("sensors", True)]
+    assert _forecast_calls(client) == [("forecast", 101, 24)]
+    assert len(_history_calls(client)) == 1
+    assert "Latest returned observation" not in _visible_text(at)
+    assert "Returned forecast details" not in _visible_text(at)
     assert not at.dataframe
     assert not at.get("plotly_chart")
     state = at.session_state.filtered_state
-    assert state["selected_location_id"] == 202
+    assert state["selected_location_id"] == 101
     assert all(
         not isinstance(value, (DashboardApiError, ForecastResponse, HistoryResponse))
         for value in state.values()

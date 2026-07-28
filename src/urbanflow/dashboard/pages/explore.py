@@ -8,6 +8,7 @@ from urbanflow.dashboard.charts import build_history_figure
 from urbanflow.dashboard.client import DashboardApiClient
 from urbanflow.dashboard.context import (
     clear_selected_location_if_missing,
+    get_selected_location_id,
     set_selected_location_id,
 )
 from urbanflow.dashboard.errors import DashboardApiError
@@ -42,10 +43,17 @@ def render_explore(client: DashboardApiClient) -> None:
         return
 
     assert context.sensors is not None
+    previous_selected_location_id = get_selected_location_id(st.session_state)
     selected_location_id = clear_selected_location_if_missing(
         st.session_state,
         context.sensors.data,
     )
+    if (
+        previous_selected_location_id is not None
+        and selected_location_id is None
+        and st.session_state.get("explore_sensor_selector") == previous_selected_location_id
+    ):
+        del st.session_state["explore_sensor_selector"]
     if not context.sensors.data:
         st.info("No active sensors were returned.")
         return

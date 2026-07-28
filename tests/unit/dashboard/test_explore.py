@@ -237,6 +237,21 @@ def test_focus_prefills_only_when_it_is_in_the_current_active_catalog() -> None:
     assert "selected_location_id" not in stale_at.session_state.filtered_state
 
 
+def test_catalog_refresh_clears_removed_initialized_focus_without_defaulting() -> None:
+    client = RecordingClient()
+    at = AppTest.from_function(_explore_harness, args=(client,))
+    at.session_state["selected_location_id"] = 202
+    at = at.run()
+    assert at.selectbox(key="explore_sensor_selector").value == 202
+
+    client.sensors = _sensors(101)
+    at = at.run()
+
+    assert at.selectbox(key="explore_sensor_selector").value == 101
+    assert "selected_location_id" not in at.session_state.filtered_state
+    assert _history_calls(client) == []
+
+
 def test_changing_sensor_or_dates_updates_focus_without_requesting_history() -> None:
     client = RecordingClient()
     at = _run(client)

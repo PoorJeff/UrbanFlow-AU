@@ -69,8 +69,9 @@ def _sensors(*location_ids: int) -> SensorListResponse:
     )
 
 
-def _forecast(location_id: int = 101) -> ForecastResponse:
+def _forecast(location_id: int = 101, *, horizon: int = 24) -> ForecastResponse:
     cutoff = datetime(2026, 7, 12, 10, tzinfo=UTC)
+    predicted_counts = [12.5, 18.0, *([10.0] * max(0, horizon - 2))][:horizon]
     return ForecastResponse(
         location_id=location_id,
         model_name="lightgbm",
@@ -78,18 +79,14 @@ def _forecast(location_id: int = 101) -> ForecastResponse:
         generated_at=cutoff + timedelta(minutes=5),
         forecast_origin_at=cutoff,
         data_cutoff_at=cutoff,
-        horizon_hours=2,
+        horizon_hours=horizon,
         predictions=[
             ForecastPredictionResponse(
-                forecast_horizon=1,
-                target_at=cutoff + timedelta(hours=1),
-                predicted_count=12.5,
-            ),
-            ForecastPredictionResponse(
-                forecast_horizon=2,
-                target_at=cutoff + timedelta(hours=2),
-                predicted_count=18.0,
-            ),
+                forecast_horizon=index,
+                target_at=cutoff + timedelta(hours=index),
+                predicted_count=count,
+            )
+            for index, count in enumerate(predicted_counts, start=1)
         ],
     )
 
@@ -147,7 +144,7 @@ class RecordingClient:
     ) -> None:
         self.health = health if health is not None else _health()
         self.sensors = sensors if sensors is not None else _sensors(101, 202)
-        self.forecast = forecast if forecast is not None else _forecast()
+        self.forecast = forecast
         self.history = history if history is not None else _history()
         self.metrics = metrics if metrics is not None else _metrics()
         self.calls: list[tuple[Any, ...]] = []
@@ -168,6 +165,8 @@ class RecordingClient:
 
     def get_forecast(self, location_id: int, *, horizon: int) -> ForecastResponse:
         self.calls.append(("forecast", location_id, horizon))
+        if self.forecast is None:
+            return _forecast(location_id, horizon=horizon)
         return self._return_or_raise(self.forecast)
 
     def get_history(
