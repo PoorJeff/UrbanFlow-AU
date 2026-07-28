@@ -7,9 +7,10 @@ from urbanflow.dashboard.config import (
     load_dashboard_config,
 )
 from urbanflow.dashboard.pages.explore import render_explore
+from urbanflow.dashboard.pages.forecast import render_forecast
 from urbanflow.dashboard.pages.today import DASHBOARD_PAGE_KEY, render_today
 
-DASHBOARD_PAGES = ("Today", "Explore")
+DASHBOARD_PAGES = ("Today", "Explore", "Forecast")
 
 
 def create_dashboard_client(config: DashboardConfig) -> DashboardApiClient:
@@ -25,6 +26,8 @@ def render_dashboard(client: DashboardApiClient) -> None:
     )
     if page == "Explore":
         render_explore(client)
+    elif page == "Forecast":
+        render_forecast(client)
     else:
         render_today(client)
 

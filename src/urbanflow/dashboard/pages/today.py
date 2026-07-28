@@ -64,10 +64,18 @@ def render_today(client: DashboardApiClient) -> None:
             "How has this location changed?",
             on_click=_navigate_to_explore,
         )
+        st.button(
+            "What returned forecast is available next?",
+            on_click=_navigate_to_forecast,
+        )
 
 
 def _navigate_to_explore() -> None:
     st.session_state[DASHBOARD_PAGE_KEY] = "Explore"
+
+
+def _navigate_to_forecast() -> None:
+    st.session_state[DASHBOARD_PAGE_KEY] = "Forecast"
 
 
 def _render_location_form(

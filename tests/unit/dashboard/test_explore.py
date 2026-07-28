@@ -427,7 +427,7 @@ def test_today_action_navigates_with_selected_id_and_no_response_state() -> None
     at = AppTest.from_function(_dashboard_harness, args=(client,))
     at = at.run()
 
-    assert at.radio(key="dashboard_page").options == ["Today", "Explore"]
+    assert at.radio(key="dashboard_page").options == ["Today", "Explore", "Forecast"]
     assert "How has this location changed?" not in _visible_text(at)
     at.session_state["selected_location_id"] = 101
     at = at.run()
