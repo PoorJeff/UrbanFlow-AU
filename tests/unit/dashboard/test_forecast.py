@@ -278,6 +278,41 @@ def test_catalog_refresh_clears_removed_initialized_focus_without_defaulting() -
     assert _forecast_calls(client) == []
     assert _history_calls(client) == []
 
+    at = at.run()
+
+    assert at.selectbox(key="forecast_sensor_selector").value == 101
+    assert "selected_location_id" not in at.session_state.filtered_state
+    assert _forecast_calls(client) == []
+    assert _history_calls(client) == []
+
+
+def test_catalog_refresh_clears_removed_focus_despite_different_stale_widget() -> None:
+    client = RecordingClient(sensors=_sensors(101))
+    at = AppTest.from_function(_forecast_harness, args=(client,))
+    at.session_state["selected_location_id"] = 202
+    at.session_state["forecast_sensor_selector"] = 101
+
+    at = at.run()
+
+    assert at.selectbox(key="forecast_sensor_selector").value == 101
+    assert "selected_location_id" not in at.session_state.filtered_state
+    assert _forecast_calls(client) == []
+    assert _history_calls(client) == []
+
+
+def test_valid_business_focus_overrides_different_stale_widget() -> None:
+    client = RecordingClient()
+    at = AppTest.from_function(_forecast_harness, args=(client,))
+    at.session_state["selected_location_id"] = 202
+    at.session_state["forecast_sensor_selector"] = 101
+
+    at = at.run()
+
+    assert at.selectbox(key="forecast_sensor_selector").value == 202
+    assert at.session_state.filtered_state["selected_location_id"] == 202
+    assert _forecast_calls(client) == []
+    assert _history_calls(client) == []
+
 
 def test_sensor_and_horizon_changes_never_request_forecast_without_submit() -> None:
     client = RecordingClient()

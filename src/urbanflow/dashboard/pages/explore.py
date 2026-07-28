@@ -25,6 +25,14 @@ HISTORY_ERROR_HEADINGS = {
     "data_store_unavailable": "History data unavailable",
     "invalid_api_response": "History response invalid",
 }
+EXPLORE_SENSOR_SELECTOR_KEY = "explore_sensor_selector"
+
+
+def _record_explore_sensor_focus() -> None:
+    set_selected_location_id(
+        st.session_state,
+        st.session_state[EXPLORE_SENSOR_SELECTOR_KEY],
+    )
 
 
 def render_explore(client: DashboardApiClient) -> None:
@@ -48,12 +56,11 @@ def render_explore(client: DashboardApiClient) -> None:
         st.session_state,
         context.sensors.data,
     )
-    if (
-        previous_selected_location_id is not None
-        and selected_location_id is None
-        and st.session_state.get("explore_sensor_selector") == previous_selected_location_id
+    if previous_selected_location_id is not None and (
+        selected_location_id is None
+        or st.session_state.get(EXPLORE_SENSOR_SELECTOR_KEY) != selected_location_id
     ):
-        del st.session_state["explore_sensor_selector"]
+        st.session_state.pop(EXPLORE_SENSOR_SELECTOR_KEY, None)
     if not context.sensors.data:
         st.info("No active sensors were returned.")
         return
@@ -64,17 +71,14 @@ def render_explore(client: DashboardApiClient) -> None:
     )
     sensors_by_id = {sensor.location_id: sensor for sensor in context.sensors.data}
     end_date = melbourne_now().date()
-    selector_was_initialized = "explore_sensor_selector" in st.session_state
     location_id = st.selectbox(
         "Active sensor",
         options=location_ids,
         index=initial_index,
         format_func=lambda value: f"{sensors_by_id[value].sensor_name} (location {value})",
-        key="explore_sensor_selector",
+        key=EXPLORE_SENSOR_SELECTOR_KEY,
+        on_change=_record_explore_sensor_focus,
     )
-
-    if selector_was_initialized and location_id != selected_location_id:
-        set_selected_location_id(st.session_state, location_id)
 
     with st.form("explore_history_form"):
         start_date = st.date_input(

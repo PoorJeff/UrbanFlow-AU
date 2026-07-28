@@ -23,6 +23,14 @@ FORECAST_ERROR_HEADINGS = {
     "sensor_not_found": "Selected sensor unavailable",
     "invalid_api_response": "Forecast response invalid",
 }
+FORECAST_SENSOR_SELECTOR_KEY = "forecast_sensor_selector"
+
+
+def _record_forecast_sensor_focus() -> None:
+    set_selected_location_id(
+        st.session_state,
+        st.session_state[FORECAST_SENSOR_SELECTOR_KEY],
+    )
 
 
 def render_forecast(client: DashboardApiClient) -> None:
@@ -47,12 +55,11 @@ def render_forecast(client: DashboardApiClient) -> None:
         st.session_state,
         context.sensors.data,
     )
-    if (
-        previous_selected_location_id is not None
-        and selected_location_id is None
-        and st.session_state.get("forecast_sensor_selector") == previous_selected_location_id
+    if previous_selected_location_id is not None and (
+        selected_location_id is None
+        or st.session_state.get(FORECAST_SENSOR_SELECTOR_KEY) != selected_location_id
     ):
-        del st.session_state["forecast_sensor_selector"]
+        st.session_state.pop(FORECAST_SENSOR_SELECTOR_KEY, None)
     if not context.sensors.data:
         st.info("No active sensors were returned.")
         return
@@ -75,17 +82,14 @@ def _render_forecast_form(
         location_ids.index(selected_location_id) if selected_location_id in location_ids else 0
     )
     sensors_by_id = {sensor.location_id: sensor for sensor in sensors}
-    selector_was_initialized = "forecast_sensor_selector" in st.session_state
     location_id = st.selectbox(
         "Active sensor",
         options=location_ids,
         index=initial_index,
         format_func=lambda value: f"{sensors_by_id[value].sensor_name} (location {value})",
-        key="forecast_sensor_selector",
+        key=FORECAST_SENSOR_SELECTOR_KEY,
+        on_change=_record_forecast_sensor_focus,
     )
-
-    if selector_was_initialized and location_id != selected_location_id:
-        set_selected_location_id(st.session_state, location_id)
 
     with st.form("forecast_request_form"):
         horizon = st.number_input(

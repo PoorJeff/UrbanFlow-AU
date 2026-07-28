@@ -251,6 +251,38 @@ def test_catalog_refresh_clears_removed_initialized_focus_without_defaulting() -
     assert "selected_location_id" not in at.session_state.filtered_state
     assert _history_calls(client) == []
 
+    at = at.run()
+
+    assert at.selectbox(key="explore_sensor_selector").value == 101
+    assert "selected_location_id" not in at.session_state.filtered_state
+    assert _history_calls(client) == []
+
+
+def test_catalog_refresh_clears_removed_focus_despite_different_stale_widget() -> None:
+    client = RecordingClient(sensors=_sensors(101))
+    at = AppTest.from_function(_explore_harness, args=(client,))
+    at.session_state["selected_location_id"] = 202
+    at.session_state["explore_sensor_selector"] = 101
+
+    at = at.run()
+
+    assert at.selectbox(key="explore_sensor_selector").value == 101
+    assert "selected_location_id" not in at.session_state.filtered_state
+    assert _history_calls(client) == []
+
+
+def test_valid_business_focus_overrides_different_stale_widget() -> None:
+    client = RecordingClient()
+    at = AppTest.from_function(_explore_harness, args=(client,))
+    at.session_state["selected_location_id"] = 202
+    at.session_state["explore_sensor_selector"] = 101
+
+    at = at.run()
+
+    assert at.selectbox(key="explore_sensor_selector").value == 202
+    assert at.session_state.filtered_state["selected_location_id"] == 202
+    assert _history_calls(client) == []
+
 
 def test_changing_sensor_or_dates_updates_focus_without_requesting_history() -> None:
     client = RecordingClient()
