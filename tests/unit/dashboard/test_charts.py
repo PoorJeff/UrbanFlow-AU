@@ -73,6 +73,10 @@ def test_build_history_figure_converts_to_melbourne_and_preserves_response_order
     ]
     assert all(value.tzinfo is MELBOURNE_TIME_ZONE for value in observed.x)
     assert list(observed.y) == [31, 24]
+    assert observed.line.dash == "solid"
+    assert figure.layout.showlegend is not False
+    assert figure.layout.xaxis.title.text == "Time"
+    assert figure.layout.yaxis.title.text == "Pedestrian count"
 
 
 def test_build_forecast_figure_labels_and_styles_observed_and_forecast(
@@ -83,7 +87,11 @@ def test_build_forecast_figure_labels_and_styles_observed_and_forecast(
 
     assert [trace.name for trace in figure.data] == ["Observed", "Forecast"]
     observed, predicted = figure.data
-    assert observed.line.dash != predicted.line.dash
+    assert observed.line.dash == "solid"
+    assert predicted.line.dash == "dash"
+    assert figure.layout.showlegend is not False
+    assert figure.layout.xaxis.title.text == "Time"
+    assert figure.layout.yaxis.title.text == "Pedestrian count"
     assert list(predicted.x) == [
         datetime(2026, 7, 12, 22, tzinfo=MELBOURNE_TIME_ZONE),
         datetime(2026, 7, 12, 21, tzinfo=MELBOURNE_TIME_ZONE),
@@ -98,6 +106,10 @@ def test_build_forecast_figure_supports_a_forecast_only_result(
     figure = build_forecast_figure(history=None, forecast=forecast)
 
     assert [trace.name for trace in figure.data] == ["Forecast"]
+    assert figure.data[0].line.dash == "dash"
+    assert figure.layout.showlegend is not False
+    assert figure.layout.xaxis.title.text == "Time"
+    assert figure.layout.yaxis.title.text == "Pedestrian count"
     assert list(figure.data[0].x) == [
         datetime(2026, 7, 12, 22, tzinfo=MELBOURNE_TIME_ZONE),
         datetime(2026, 7, 12, 21, tzinfo=MELBOURNE_TIME_ZONE),
