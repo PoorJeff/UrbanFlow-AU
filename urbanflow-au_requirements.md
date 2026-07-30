@@ -288,6 +288,16 @@ API 要求：
 
 ## 11. Dashboard 要求
 
+> **当前首切片状态（2026-07-26）：** 本章节描述的是最终 Dashboard 目标。
+> 当前实现仅交付三个相互衔接的页面：`Today`、`Explore` 与 `Forecast`。
+> `Today` 先引导用户选择一个 API 返回的传感器，再按需读取该地点的真实
+> history 和 forecast。首切片不包含地图、跨传感器聚合、日/周模式、缺失率或
+> 异常检测、模型选择/基线回退、Monitoring 页面、漂移报告、Docker 或部署。
+> 所有数值和状态只能来自 FastAPI 当前响应；人本化文案不能伪造数据、预测或
+> 因果解释。具体行为以
+> `docs/superpowers/specs/2026-07-23-streamlit-operations-dashboard-design.md`
+> 为准。
+
 ### Overview
 
 - 数据最新时间、传感器数量、模型版本、总体 WAPE；
@@ -315,7 +325,8 @@ API 要求：
 - 特征漂移和预测漂移；
 - 数据新鲜度、缺失率和异常记录数。
 
-界面应面向重复使用的运营工具设计，保持紧凑、可扫描，不制作营销式首页。
+界面应面向重复使用的运营工具设计，保持紧凑、可扫描，并以一个地点的一天为
+主线提供清晰的后续探索入口；不制作营销式首页，也不以技术状态卡压过主要任务。
 
 ## 12. 监控与异常处理
 
@@ -335,7 +346,8 @@ API 要求：
 
 ### 降级策略
 
-- 主模型无法加载：切换至 Seasonal Naive；
+- 主模型无法加载：切换至 Seasonal Naive；**未来 serving 切片才可定义此策略，
+  当前 Dashboard/API 必须显示 `model_unavailable`，不得生成回退预测；**
 - 数据库暂时不可用：Dashboard 显示错误状态，不伪造预测；
 - 天气预报 API 不可用：使用最近一次有效预报或缺失标记，绝不使用事后获得的未来真实天气；
 - 数据质量检查失败：停止训练并保留上一个稳定模型。
@@ -385,6 +397,7 @@ urbanflow-au/
 │   │       ├── sensors.py
 │   │       ├── forecasts.py
 │   │       └── models.py
+│   ├── dashboard/
 │   ├── monitoring/
 │   └── orchestration/
 ├── tests/
@@ -443,6 +456,10 @@ README 还必须包含：
 - 不夸大结果的项目总结。
 
 ## 16. 验收标准
+
+> **说明：** 以下是完整项目终态的验收标准，不是当前 Dashboard 首切片的
+> 完成定义。首切片的可执行验收条件在
+> `docs/superpowers/specs/2026-07-23-streamlit-operations-dashboard-design.md`。
 
 项目只有同时满足以下条件才算完成：
 

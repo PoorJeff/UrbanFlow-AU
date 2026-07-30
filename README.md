@@ -2,11 +2,13 @@
 
 UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand at selected City of Melbourne sensor locations. It will connect reproducible public-data ingestion, leakage-safe time-series evaluation, model serving, an operations dashboard, and MLOps monitoring.
 
-> **Project status:** foundation, local-baseline, and first FastAPI serving
-> boundary stage. Local ingestion, persistence, feature-building, baseline
-> evaluation, reporting, MLflow tracking, and typed API reads are in place.
-> PostgreSQL-backed reads and trusted local LightGBM artifact forecasts are
-> opt-in; production forecasting performance claims are not in place.
+> **Project status:** foundation, local-baseline, first FastAPI serving
+> boundary, and initial Streamlit operations views. Local ingestion,
+> persistence, feature-building, baseline evaluation, reporting, MLflow
+> tracking, typed API reads, and guided `Today`, `Explore`, and `Forecast`
+> views are in place. PostgreSQL-backed reads and trusted local LightGBM
+> artifact forecasts are opt-in; Evidently monitoring, deployment/packaging,
+> and production forecasting performance claims are not in place.
 
 ## Requirements
 
@@ -161,6 +163,38 @@ Without that environment variable, or if the summary is unusable,
 summary lacks `model_version`, `mlflow_run_id`, `mlflow_tracking_uri`, or
 `report_path`, the response uses JSON `null`; the API never invents that
 metadata and never queries an MLflow server.
+
+## Run the Streamlit operations dashboard
+
+Run the API and dashboard as two local processes. In the first PowerShell
+terminal, start and configure the existing FastAPI service:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn urbanflow.api.app:app --reload
+```
+
+In the second PowerShell terminal, start the dashboard:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py
+```
+
+The dashboard uses `http://127.0.0.1:8000` by default. Set
+`URBANFLOW_DASHBOARD_API_BASE_URL` only when the API runs on another origin:
+
+```powershell
+$env:URBANFLOW_DASHBOARD_API_BASE_URL = "http://127.0.0.1:9000"
+.\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py
+```
+
+The default unconfigured FastAPI process has no persisted sensor data or model
+artifact, so the dashboard honestly shows degraded or empty states rather than
+inventing results. A user must choose a returned active location before
+detailed data loads. The guided workflow starts at `Today`, then links to
+`Explore` for bounded returned history or `Forecast` for a direct forecast
+request. A real forecast requires the existing API database and model
+configuration described above. These views are an initial non-production
+operations boundary; monitoring and deployment are still future work.
 
 ## Run sensor-location ingestion locally
 
@@ -383,8 +417,10 @@ design, so routine unit tests do not require a running PostgreSQL service.
    sensor/history reads, a trusted local artifact-backed direct-forecast
    provider, and local evaluation-summary metrics. The slice remains explicitly
    non-production.
-5. Streamlit operations views and Evidently monitoring.
-6. Docker Compose packaging, evaluation evidence, screenshots, and portfolio documentation.
+5. Initial Streamlit `Today`, `Explore`, and `Forecast` operations views are
+   delivered; Evidently monitoring remains future work.
+6. Docker Compose deployment/packaging, evaluation evidence, screenshots, and
+   portfolio documentation remain future work.
 
 ## Data policy
 

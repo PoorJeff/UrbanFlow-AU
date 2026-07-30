@@ -1,0 +1,591 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
+import pytest
+from streamlit.testing.v1 import AppTest
+
+from urbanflow.api.schemas import (
+    ComponentHealth,
+    FinalTestWindowResponse,
+    ForecastPredictionResponse,
+    ForecastResponse,
+    HealthComponents,
+    HealthResult,
+    HistoryPoint,
+    HistoryResponse,
+    ModelMetricsResponse,
+    ModelMetricValues,
+    SensorListMeta,
+    SensorListResponse,
+    SensorResponse,
+)
+from urbanflow.dashboard.config import DEFAULT_API_BASE_URL, load_dashboard_config
+from urbanflow.dashboard.errors import DashboardApiError
+from urbanflow.dashboard.time_utils import format_melbourne_timestamp
+
+
+def _error(code: str, message: str | None = None) -> DashboardApiError:
+    return DashboardApiError(
+        status_code=503,
+        code=code,
+        message=message or f"{code} test message",
+        details=(),
+    )
+
+
+def _health(status: str = "ok") -> HealthResult:
+    component_status = "available" if status == "ok" else "unconfigured"
+    return HealthResult(
+        status=status,
+        service="urbanflow-au-api",
+        version="0.1.0",
+        generated_at=datetime(2026, 7, 12, 10, 30, tzinfo=UTC),
+        components=HealthComponents(
+            api_process=ComponentHealth(status="available"),
+            model_provider=ComponentHealth(status=component_status),
+            data_store=ComponentHealth(status=component_status),
+            data_freshness=ComponentHealth(status=component_status),
+        ),
+        model_version="model-v1" if status == "ok" else None,
+        data_cutoff_at=datetime(2026, 7, 12, 10, tzinfo=UTC) if status == "ok" else None,
+    )
+
+
+def _sensors(*location_ids: int) -> SensorListResponse:
+    return SensorListResponse(
+        data=[
+            SensorResponse(
+                location_id=location_id,
+                sensor_name=f"Sensor {location_id}",
+                sensor_description=f"Description {location_id}",
+                status="Active",
+                latitude=-37.81,
+                longitude=144.96,
+            )
+            for location_id in location_ids
+        ],
+        meta=SensorListMeta(count=len(location_ids), active_only=True),
+    )
+
+
+def _forecast(
+    location_id: int = 101,
+    *,
+    horizon: int = 24,
+    predicted_counts: list[float] | None = None,
+) -> ForecastResponse:
+    cutoff = datetime(2026, 7, 12, 10, tzinfo=UTC)
+    returned_counts = (
+        predicted_counts
+        if predicted_counts is not None
+        else [
+            12.5,
+            18.0,
+            *([10.0] * max(0, horizon - 2)),
+        ][:horizon]
+    )
+    return ForecastResponse(
+        location_id=location_id,
+        model_name="lightgbm",
+        model_version="model-v1",
+        generated_at=cutoff + timedelta(minutes=5),
+        forecast_origin_at=cutoff,
+        data_cutoff_at=cutoff,
+        horizon_hours=horizon,
+        predictions=[
+            ForecastPredictionResponse(
+                forecast_horizon=index,
+                target_at=cutoff + timedelta(hours=index),
+                predicted_count=count,
+            )
+            for index, count in enumerate(returned_counts, start=1)
+        ],
+    )
+
+
+def _history(location_id: int = 101, *, empty: bool = False) -> HistoryResponse:
+    end = datetime(2026, 7, 12, 10, tzinfo=UTC) + timedelta(microseconds=1)
+    return HistoryResponse(
+        location_id=location_id,
+        start=end - timedelta(hours=24),
+        end=end,
+        data=[]
+        if empty
+        else [
+            HistoryPoint(
+                observed_at=datetime(2026, 7, 12, 8, tzinfo=UTC),
+                pedestrian_count=24,
+            ),
+            HistoryPoint(
+                observed_at=datetime(2026, 7, 12, 9, tzinfo=UTC),
+                pedestrian_count=31,
+            ),
+        ],
+    )
+
+
+def _metrics() -> ModelMetricsResponse:
+    return ModelMetricsResponse(
+        model_name="lightgbm",
+        model_version="model-v1",
+        evaluation_source="evaluation_summary",
+        final_test_window=FinalTestWindowResponse(
+            name="final_test_2025-02",
+            start=datetime(2025, 2, 1, tzinfo=UTC),
+            end=datetime(2025, 3, 1, tzinfo=UTC),
+        ),
+        metrics=ModelMetricValues(
+            mae=1.2,
+            rmse=1.7,
+            wape=0.07,
+            seasonal_naive_wape=0.095,
+            relative_wape_improvement=0.263,
+        ),
+    )
+
+
+class RecordingClient:
+    def __init__(
+        self,
+        *,
+        health: HealthResult | DashboardApiError | None = None,
+        sensors: SensorListResponse | DashboardApiError | None = None,
+        forecast: ForecastResponse | DashboardApiError | None = None,
+        history: HistoryResponse | DashboardApiError | None = None,
+        metrics: ModelMetricsResponse | DashboardApiError | None = None,
+    ) -> None:
+        self.health = health if health is not None else _health()
+        self.sensors = sensors if sensors is not None else _sensors(101, 202)
+        self.forecast = forecast
+        self.history = history if history is not None else _history()
+        self.metrics = metrics if metrics is not None else _metrics()
+        self.calls: list[tuple[Any, ...]] = []
+
+    @staticmethod
+    def _return_or_raise(result: Any) -> Any:
+        if isinstance(result, DashboardApiError):
+            raise result
+        return result
+
+    def get_health(self) -> HealthResult:
+        self.calls.append(("health",))
+        return self._return_or_raise(self.health)
+
+    def list_sensors(self, *, active_only: bool = True) -> SensorListResponse:
+        self.calls.append(("sensors", active_only))
+        return self._return_or_raise(self.sensors)
+
+    def get_forecast(self, location_id: int, *, horizon: int) -> ForecastResponse:
+        self.calls.append(("forecast", location_id, horizon))
+        if self.forecast is None:
+            return _forecast(location_id, horizon=horizon)
+        return self._return_or_raise(self.forecast)
+
+    def get_history(
+        self,
+        location_id: int,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> HistoryResponse:
+        self.calls.append(("history", location_id, start, end))
+        return self._return_or_raise(self.history)
+
+    def get_model_metrics(self) -> ModelMetricsResponse:
+        self.calls.append(("metrics",))
+        return self._return_or_raise(self.metrics)
+
+
+def _today_harness(client):
+    from urbanflow.dashboard.pages.today import render_today
+
+    render_today(client)
+
+
+def _dashboard_harness(client, api_origin=None):
+    from urbanflow.dashboard.application import render_dashboard
+
+    if api_origin is None:
+        render_dashboard(client)
+    else:
+        render_dashboard(client, api_origin=api_origin)
+
+
+def _run(client: RecordingClient) -> AppTest:
+    return AppTest.from_function(_today_harness, args=(client,)).run()
+
+
+def _visible_text(at: AppTest) -> str:
+    values: list[str] = []
+    for element_type in (
+        "title",
+        "header",
+        "subheader",
+        "markdown",
+        "caption",
+        "text",
+        "info",
+        "warning",
+        "error",
+        "success",
+        "metric",
+        "button",
+        "selectbox",
+    ):
+        for element in at.get(element_type):
+            for attribute in ("value", "label"):
+                value = getattr(element, attribute, None)
+                if value is not None:
+                    values.append(str(value))
+    return "\n".join(values)
+
+
+def _click(at: AppTest, key: str) -> AppTest:
+    return at.button(key=key).click().run()
+
+
+def _click_label(at: AppTest, label: str) -> AppTest:
+    return next(button for button in at.button if button.label == label).click().run()
+
+
+def _plotly_spec(at: AppTest) -> dict[str, Any]:
+    charts = at.get("plotly_chart")
+    assert len(charts) == 1
+    return json.loads(charts[0].proto.spec)
+
+
+def _dataframe_with_columns(at: AppTest, columns: list[str]):
+    return next(frame for frame in at.dataframe if list(frame.value.columns) == columns)
+
+
+def test_first_visit_is_guided_and_requests_only_context() -> None:
+    client = RecordingClient()
+
+    at = _run(client)
+
+    assert not at.exception
+    assert client.calls == [("health",), ("sensors", True)]
+    text = _visible_text(at)
+    assert "Today" in text
+    assert "Choose an active sensor" in text
+    assert at.selectbox(key="today_location_selector").label == "Active sensor"
+    assert at.button(key="load_today_location").label == "Load this location"
+    assert not at.metric
+    assert not at.dataframe
+    assert not at.get("plotly_chart")
+
+
+def test_degraded_health_is_an_availability_signal_and_still_lists_sensors() -> None:
+    client = RecordingClient(health=_health("degraded"))
+
+    at = _run(client)
+
+    assert client.calls == [("health",), ("sensors", True)]
+    text = _visible_text(at)
+    assert "degraded" in text.lower()
+    assert "configuration and availability" in text.lower()
+    assert "does not indicate that data or a model is ready" in text.lower()
+
+
+@pytest.mark.parametrize(
+    ("health", "expected_text"),
+    [
+        (_health("unavailable"), "Service unavailable"),
+        (
+            _error("api_unreachable", "The API could not be reached."),
+            "The API could not be reached.",
+        ),
+    ],
+)
+def test_unavailable_or_failed_health_stops_before_catalog(
+    health: HealthResult | DashboardApiError,
+    expected_text: str,
+) -> None:
+    client = RecordingClient(health=health)
+
+    at = _run(client)
+
+    assert client.calls == [("health",)]
+    assert expected_text in _visible_text(at)
+    assert not at.selectbox
+    assert not at.get("plotly_chart")
+
+
+def test_empty_active_catalog_has_a_visible_state_without_details() -> None:
+    client = RecordingClient(sensors=_sensors())
+
+    at = _run(client)
+
+    assert client.calls == [("health",), ("sensors", True)]
+    assert "No active sensors were returned." in _visible_text(at)
+    assert not at.selectbox
+    assert not at.get("plotly_chart")
+
+
+def test_selection_alone_never_loads_details_and_hides_an_old_result() -> None:
+    client = RecordingClient(forecast=_forecast(202), history=_history(202))
+    at = _run(client)
+
+    at.selectbox(key="today_location_selector").select(202)
+    at = at.run()
+    assert client.calls == [
+        ("health",),
+        ("sensors", True),
+        ("health",),
+        ("sensors", True),
+    ]
+
+    at = _click(at, "load_today_location")
+    assert client.calls[-4] == ("health",)
+    assert client.calls[-3] == ("sensors", True)
+    assert client.calls[-2] == ("forecast", 202, 24)
+    assert client.calls[-1][:2] == ("history", 202)
+    assert at.session_state.filtered_state["selected_location_id"] == 202
+    assert "Sensor 202" in _visible_text(at)
+
+    at.selectbox(key="today_location_selector").select(101)
+    at = at.run()
+    assert [call[0] for call in client.calls[-2:]] == ["health", "sensors"]
+    assert "Latest returned observation" not in _visible_text(at)
+    assert not at.dataframe
+    assert not at.get("plotly_chart")
+
+
+def test_submit_renders_full_current_response_and_no_response_session_state() -> None:
+    client = RecordingClient()
+    at = _run(client)
+
+    at = _click(at, "load_today_location")
+
+    assert [call[0] for call in client.calls] == [
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "forecast",
+        "history",
+    ]
+    text = _visible_text(at)
+    assert "Sensor 101" in text
+    assert "Description 101" in text
+    assert "Latest returned observation" in text
+    assert "31" in text
+    assert "Largest returned prediction" in text
+    assert "18" in text
+    assert "lightgbm" in text
+    assert "model-v1" in text
+    assert "Generated at" in text
+    assert "Data cutoff" in text
+    history_frame = _dataframe_with_columns(at, ["Observed at", "Pedestrian count"])
+    assert history_frame.value["Pedestrian count"].tolist() == [24, 31]
+    prediction_frame = _dataframe_with_columns(at, ["Target at", "Predicted count"])
+    assert prediction_frame.value["Predicted count"].tolist() == [
+        prediction.predicted_count for prediction in _forecast().predictions
+    ]
+    assert prediction_frame.value["Target at"].tolist() == [
+        format_melbourne_timestamp(prediction.target_at) for prediction in _forecast().predictions
+    ]
+
+    spec = _plotly_spec(at)
+    assert [trace["name"] for trace in spec["data"]] == ["Observed", "Forecast"]
+    assert spec["data"][0]["line"]["dash"] == "solid"
+    assert spec["data"][1]["line"]["dash"] == "dash"
+
+    state = at.session_state.filtered_state
+    assert state["selected_location_id"] == 101
+    assert set(state) == {
+        "selected_location_id",
+        "load_today_location",
+        "today_location_selector",
+        "view_historical_model_evaluation",
+    }
+
+
+def test_forecast_with_empty_history_is_explicitly_forecast_only() -> None:
+    client = RecordingClient(history=_history(empty=True))
+
+    at = _click(_run(client), "load_today_location")
+
+    text = _visible_text(at)
+    assert "No observations were returned for the matching interval." in text
+    prediction_frame = _dataframe_with_columns(at, ["Target at", "Predicted count"])
+    assert prediction_frame.value["Predicted count"].tolist() == [
+        prediction.predicted_count for prediction in _forecast().predictions
+    ]
+    spec = _plotly_spec(at)
+    assert [trace["name"] for trace in spec["data"]] == ["Forecast"]
+    assert "Largest returned prediction" in text
+
+
+@pytest.mark.parametrize("code", ["model_unavailable", "forecast_unavailable"])
+def test_forecast_availability_error_keeps_independent_history_only(code: str) -> None:
+    client = RecordingClient(forecast=_error(code))
+
+    at = _click(_run(client), "load_today_location")
+
+    text = _visible_text(at)
+    assert "Forecast unavailable" in text
+    assert "Largest returned prediction" not in text
+    assert len(at.dataframe) == 1
+    spec = _plotly_spec(at)
+    assert [trace["name"] for trace in spec["data"]] == ["Observed"]
+
+
+def test_history_failure_is_visible_and_never_removes_current_forecast() -> None:
+    client = RecordingClient(history=_error("api_request_failed", "Observations request failed."))
+
+    at = _click(_run(client), "load_today_location")
+
+    text = _visible_text(at)
+    assert "Observations unavailable" in text
+    assert "Observations request failed." in text
+    prediction_frame = _dataframe_with_columns(at, ["Target at", "Predicted count"])
+    assert prediction_frame.value["Predicted count"].tolist() == [
+        prediction.predicted_count for prediction in _forecast().predictions
+    ]
+    spec = _plotly_spec(at)
+    assert [trace["name"] for trace in spec["data"]] == ["Forecast"]
+    assert "Largest returned prediction" in text
+
+
+def test_other_forecast_error_is_visible_without_history_or_fallback() -> None:
+    client = RecordingClient(
+        forecast=_error("invalid_api_response", "Forecast response was invalid.")
+    )
+
+    at = _click(_run(client), "load_today_location")
+
+    assert [call[0] for call in client.calls].count("history") == 0
+    text = _visible_text(at)
+    assert "Forecast response was invalid." in text
+    assert "Largest returned prediction" not in text
+    assert not at.dataframe
+    assert not at.get("plotly_chart")
+
+
+def test_largest_prediction_preserves_returned_float_precision() -> None:
+    largest_value = 9876.54321098765
+    forecast = _forecast(predicted_counts=[0.123456789012345, largest_value])
+    client = RecordingClient(forecast=forecast)
+
+    at = _click(_run(client), "load_today_location")
+
+    assert (
+        f"Largest returned prediction: {largest_value} pedestrians at "
+        f"{format_melbourne_timestamp(forecast.predictions[-1].target_at)}."
+    ) in _visible_text(at)
+
+
+def test_dashboard_displays_default_and_validated_custom_api_origins() -> None:
+    default_at = AppTest.from_function(
+        _dashboard_harness,
+        args=(RecordingClient(),),
+    ).run()
+    custom_origin = load_dashboard_config(
+        {"URBANFLOW_DASHBOARD_API_BASE_URL": "https://dashboard.example/"}
+    ).api_base_url
+    custom_at = AppTest.from_function(
+        _dashboard_harness,
+        args=(RecordingClient(), custom_origin),
+    ).run()
+
+    assert f"API origin: {DEFAULT_API_BASE_URL}" in _visible_text(default_at)
+    assert "API origin: https://dashboard.example" in _visible_text(custom_at)
+
+
+def test_today_result_does_not_cross_into_explore_and_explore_loads_fresh_history() -> None:
+    client = RecordingClient()
+    at = AppTest.from_function(_dashboard_harness, args=(client,)).run()
+
+    at = _click(at, "load_today_location")
+    assert "Largest returned prediction" in _visible_text(at)
+    assert len(at.dataframe) == 2
+
+    at = _click_label(at, "How has this location changed?")
+
+    text = _visible_text(at)
+    assert "Explore" in text
+    assert "Largest returned prediction" not in text
+    assert "Latest returned observation" not in text
+    assert not at.dataframe
+    assert not at.get("plotly_chart")
+    assert [call[0] for call in client.calls] == [
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "forecast",
+        "history",
+        "health",
+        "sensors",
+    ]
+
+    at = _click(at, "load_explore_history")
+
+    assert [call[0] for call in client.calls] == [
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "forecast",
+        "history",
+        "health",
+        "sensors",
+        "health",
+        "sensors",
+        "history",
+    ]
+    assert client.calls[-1][1] == 101
+    assert "Observed history" in _visible_text(at)
+    assert _dataframe_with_columns(at, ["Observed at", "Pedestrian count"]).value[
+        "Pedestrian count"
+    ].tolist() == [24, 31]
+    assert all(
+        isinstance(value, (bool, int, float, str, date, type(None)))
+        for value in at.session_state.filtered_state.values()
+    )
+
+
+def test_metrics_are_requested_only_by_explicit_historical_evaluation_action() -> None:
+    client = RecordingClient()
+    at = _run(client)
+
+    assert [call[0] for call in client.calls].count("metrics") == 0
+    assert not at.metric
+
+    at = _click(at, "view_historical_model_evaluation")
+
+    assert [call[0] for call in client.calls].count("metrics") == 1
+    text = _visible_text(at)
+    assert "Historical evaluation context" in text
+    assert [metric.label for metric in at.metric] == [
+        "Historical MAE",
+        "Historical RMSE",
+        "Historical WAPE",
+    ]
+    assert "current accuracy" not in text.lower()
+
+
+def test_metrics_unavailable_is_optional_visible_state() -> None:
+    client = RecordingClient(
+        metrics=_error("metrics_unavailable", "Evaluation metrics were not returned.")
+    )
+
+    at = _click(_run(client), "view_historical_model_evaluation")
+
+    assert "Historical evaluation unavailable" in _visible_text(at)
+    assert "Evaluation metrics were not returned." in _visible_text(at)
+    assert not at.metric
+
+
+def test_catalog_refresh_clears_focus_that_is_no_longer_active() -> None:
+    client = RecordingClient()
+    at = _run(client)
+    at.session_state["selected_location_id"] = 999
+
+    at = at.run()
+
+    assert "selected_location_id" not in at.session_state.filtered_state
