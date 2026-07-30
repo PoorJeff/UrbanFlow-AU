@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -14,7 +15,14 @@ from urbanflow.api.app import create_app
 from urbanflow.api.errors import UrbanFlowApiError
 from urbanflow.api.lightgbm_provider import ArtifactBackedLightGBMForecastProvider
 from urbanflow.api.postgres import PostgresSensorHistoryRepository
-from urbanflow.api.services import ApiServices, EmptyHistoryRepository, EmptySensorRepository
+from urbanflow.api.services import (
+    API_MAX_DATA_AGE_HOURS_ENV_VAR,
+    ApiRuntimeConfigError,
+    ApiServices,
+    EmptyHistoryRepository,
+    EmptySensorRepository,
+    RuntimeHealthService,
+)
 from urbanflow.database.config import DATABASE_URL_ENV_VAR, DatabaseConfigError
 from urbanflow.database.models import PedestrianHourlyFact, SensorDim
 from urbanflow.modeling.lightgbm_artifact import LightGBMArtifactError
@@ -58,6 +66,9 @@ class StatementAwareSession:
         if entity is PedestrianHourlyFact:
             return FakeScalarResult(self._facts)
         raise AssertionError(f"Unexpected ORM entity: {entity}")
+
+    def scalar(self, _statement: object) -> datetime | None:
+        return max((fact.observed_at for fact in self._facts), default=None)
 
 
 class StatementAwareSessionFactory:
@@ -137,6 +148,9 @@ def test_create_default_services_uses_empty_repositories_without_a_database_url(
         assert isinstance(services.sensor_repository, EmptySensorRepository)
         assert isinstance(services.history_repository, EmptyHistoryRepository)
         assert services.model_provider is None
+        assert isinstance(services.health, RuntimeHealthService)
+        assert services.health.data_readiness_repository is None
+        assert services.health.model_provider_status == "unconfigured"
 
 
 def test_create_default_services_builds_one_shared_postgres_repository_lazily(
@@ -176,6 +190,9 @@ def test_create_default_services_builds_one_shared_postgres_repository_lazily(
     assert isinstance(services.sensor_repository, PostgresSensorHistoryRepository)
     assert services.sensor_repository is services.history_repository
     assert services.model_provider is None
+    assert isinstance(services.health, RuntimeHealthService)
+    assert services.health.data_readiness_repository is services.history_repository
+    assert services.health.model_provider_status == "unconfigured"
     assert not session_factory_called
 
 
@@ -196,14 +213,20 @@ def test_create_default_services_ignores_artifact_without_database(
     assert isinstance(services.sensor_repository, EmptySensorRepository)
     assert isinstance(services.history_repository, EmptyHistoryRepository)
     assert services.model_provider is None
+    assert isinstance(services.health, RuntimeHealthService)
+    assert services.health.data_readiness_repository is None
 
 
 def test_create_default_services_wires_artifact_provider_for_complete_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = object()
-    session_factory = object()
-    artifact = object()
+    session_factory = StatementAwareSessionFactory(
+        active_sensors=[],
+        inactive_sensors=[],
+        facts=[_fact(datetime(2026, 7, 30, 11, tzinfo=UTC), pedestrian_count=42)],
+    )
+    artifact = SimpleNamespace(manifest=SimpleNamespace(model_version="lightgbm-smoke-v1"))
     loaded_paths: list[str] = []
     monkeypatch.setattr(app_module, "create_database_engine", lambda _url: engine)
     monkeypatch.setattr(app_module, "create_session_factory", lambda _engine: session_factory)
@@ -227,6 +250,17 @@ def test_create_default_services_wires_artifact_provider_for_complete_configurat
     assert isinstance(services.model_provider, ArtifactBackedLightGBMForecastProvider)
     assert services.model_provider._artifact is artifact
     assert services.model_provider._history_repository is services.history_repository
+    assert isinstance(services.health, RuntimeHealthService)
+    assert services.health.model_provider_status == "available"
+    assert services.health.model_version == "lightgbm-smoke-v1"
+    assert session_factory.sessions == []
+
+    health = api_get(create_app(services=services), "/health")
+
+    assert health.status_code == 200
+    assert health.json()["components"]["model_provider"] == {"status": "available"}
+    assert health.json()["model_version"] == "lightgbm-smoke-v1"
+    assert len(session_factory.sessions) == 1
 
 
 def test_invalid_artifact_degrades_forecast_without_disabling_postgres_reads(
@@ -260,6 +294,8 @@ def test_invalid_artifact_degrades_forecast_without_disabling_postgres_reads(
         )
     )
 
+    assert session_factory.sessions == []
+    health = api_get(application, "/health")
     sensors = api_get(application, "/api/v1/sensors")
     forecast = api_get(
         application,
@@ -267,6 +303,8 @@ def test_invalid_artifact_degrades_forecast_without_disabling_postgres_reads(
         params={"horizon": 1},
     )
 
+    assert health.status_code == 200
+    assert health.json()["components"]["model_provider"] == {"status": "unavailable"}
     assert sensors.status_code == 200
     assert [row["location_id"] for row in sensors.json()["data"]] == [999001]
     assert forecast.status_code == 503
@@ -277,6 +315,38 @@ def test_invalid_artifact_degrades_forecast_without_disabling_postgres_reads(
             "details": [],
         }
     }
+
+
+def test_create_default_services_uses_max_data_age_from_supplied_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(API_MAX_DATA_AGE_HOURS_ENV_VAR, "48")
+    monkeypatch.setattr(app_module, "create_database_engine", lambda _url: object())
+    monkeypatch.setattr(app_module, "create_session_factory", lambda _engine: object())
+
+    services = app_module.create_default_services(
+        environ={
+            DATABASE_URL_ENV_VAR: "postgresql+psycopg://user:pass@db/urbanflow",
+            API_MAX_DATA_AGE_HOURS_ENV_VAR: "24",
+        }
+    )
+
+    assert isinstance(services.health, RuntimeHealthService)
+    assert services.health.max_data_age == timedelta(hours=24)
+
+
+def test_create_default_services_rejects_invalid_max_data_age_without_a_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbid_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid age configuration must fail before I/O")
+
+    monkeypatch.setattr(app_module, "create_database_engine", forbid_call)
+    monkeypatch.setattr(app_module, "create_session_factory", forbid_call)
+    monkeypatch.setattr(app_module, "load_lightgbm_artifact", forbid_call)
+
+    with pytest.raises(ApiRuntimeConfigError, match=API_MAX_DATA_AGE_HOURS_ENV_VAR):
+        app_module.create_default_services(environ={API_MAX_DATA_AGE_HOURS_ENV_VAR: "invalid"})
 
 
 def test_default_app_reads_sensor_and_history_data_through_postgres_repository(

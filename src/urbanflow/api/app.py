@@ -9,7 +9,12 @@ from urbanflow.api.errors import UrbanFlowApiError, urbanflow_api_error_handler
 from urbanflow.api.lightgbm_provider import ArtifactBackedLightGBMForecastProvider
 from urbanflow.api.postgres import PostgresSensorHistoryRepository
 from urbanflow.api.routers import router as api_router
-from urbanflow.api.services import ApiServices, ForecastModelProvider
+from urbanflow.api.services import (
+    ApiServices,
+    ForecastModelProvider,
+    RuntimeHealthService,
+    parse_max_data_age,
+)
 from urbanflow.database.config import DATABASE_URL_ENV_VAR, DatabaseConfigError
 from urbanflow.database.engine import create_database_engine, create_session_factory
 from urbanflow.modeling.lightgbm_artifact import LightGBMArtifactError, load_lightgbm_artifact
@@ -22,9 +27,17 @@ def create_default_services(
     environ: Mapping[str, str] | None = None,
 ) -> ApiServices:
     values = os.environ if environ is None else environ
+    max_data_age = parse_max_data_age(values)
     configured_url = values.get(DATABASE_URL_ENV_VAR)
     if configured_url is None or not configured_url.strip():
-        return ApiServices()
+        return ApiServices(
+            health=RuntimeHealthService(
+                data_readiness_repository=None,
+                model_provider_status="unconfigured",
+                model_version=None,
+                max_data_age=max_data_age,
+            )
+        )
     try:
         engine = create_database_engine(configured_url.strip())
     except ArgumentError as exc:
@@ -33,17 +46,27 @@ def create_default_services(
     repository = PostgresSensorHistoryRepository(session_factory)
     configured_artifact_path = values.get(MODEL_ARTIFACT_PATH_ENV_VAR)
     model_provider: ForecastModelProvider | None = None
+    model_provider_status = "unconfigured"
+    model_version = None
     if configured_artifact_path is not None and configured_artifact_path.strip():
         try:
             artifact = load_lightgbm_artifact(configured_artifact_path.strip())
         except LightGBMArtifactError:
-            model_provider = None
+            model_provider_status = "unavailable"
         else:
             model_provider = ArtifactBackedLightGBMForecastProvider(
                 artifact=artifact,
                 history_repository=repository,
             )
+            model_provider_status = "available"
+            model_version = artifact.manifest.model_version
     return ApiServices(
+        health=RuntimeHealthService(
+            data_readiness_repository=repository,
+            model_provider_status=model_provider_status,
+            model_version=model_version,
+            max_data_age=max_data_age,
+        ),
         sensor_repository=repository,
         history_repository=repository,
         model_provider=model_provider,

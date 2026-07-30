@@ -247,8 +247,9 @@ def _render_data_and_model_context(
     with st.expander("Data and model context"):
         if health.status == "degraded":
             st.warning(
-                "The API reported degraded configuration and availability. "
-                "This status does not indicate that data or a model is ready."
+                "The API reported degraded configuration or availability. Review the component "
+                "statuses below; a healthy-looking service does not guarantee the selected sensor "
+                "has the 168-hour input history and holiday coverage required for a forecast."
             )
         st.write(f"API status: {health.status}")
         st.write(f"Health generated at: {format_melbourne_timestamp(health.generated_at)}")

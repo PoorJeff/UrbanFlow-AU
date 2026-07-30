@@ -278,7 +278,7 @@ def test_first_visit_is_guided_and_requests_only_context() -> None:
     assert not at.get("plotly_chart")
 
 
-def test_degraded_health_is_an_availability_signal_and_still_lists_sensors() -> None:
+def test_degraded_health_guides_component_review_and_still_lists_sensors() -> None:
     client = RecordingClient(health=_health("degraded"))
 
     at = _run(client)
@@ -286,8 +286,10 @@ def test_degraded_health_is_an_availability_signal_and_still_lists_sensors() -> 
     assert client.calls == [("health",), ("sensors", True)]
     text = _visible_text(at)
     assert "degraded" in text.lower()
-    assert "configuration and availability" in text.lower()
-    assert "does not indicate that data or a model is ready" in text.lower()
+    assert "degraded configuration or availability" in text.lower()
+    assert "review the component statuses" in text.lower()
+    assert "healthy-looking service does not guarantee" in text.lower()
+    assert "168-hour input history and holiday coverage" in text.lower()
 
 
 @pytest.mark.parametrize(
