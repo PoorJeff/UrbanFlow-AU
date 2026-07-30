@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import traceback
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -71,6 +72,25 @@ def test_schema_database_url_preserves_query_and_encodes_validated_search_path()
     assert "options=-csearch_path%3Durbanflow_serving_e2e_test" in child_url
 
 
+def test_schema_database_url_preserves_existing_non_search_path_options() -> None:
+    base_url = (
+        "postgresql+psycopg://urbanflow:secret@localhost:5432/urbanflow"
+        "?sslmode=require"
+        "&options=-cstatement_timeout%3D5000%20-csearch_path%3Dpublic"
+    )
+
+    child_url = serving_e2e_smoke._schema_database_url(
+        base_url,
+        "urbanflow_serving_e2e_test",
+    )
+
+    parsed = make_url(child_url)
+    assert parsed.query["sslmode"] == "require"
+    assert parsed.query["options"] == (
+        "-cstatement_timeout=5000 -csearch_path=urbanflow_serving_e2e_test"
+    )
+
+
 def test_child_environment_scrubs_inherited_urbanflow_settings(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -80,6 +100,10 @@ def test_child_environment_scrubs_inherited_urbanflow_settings(
     monkeypatch.setenv("URBANFLOW_API_MODEL_ARTIFACT_PATH", "inherited-artifact")
     monkeypatch.setenv("URBANFLOW_API_MAX_DATA_AGE_HOURS", "999")
     monkeypatch.setenv("URBANFLOW_OTHER_SECRET", "must-be-removed")
+    monkeypatch.setenv("UVICORN_RELOAD", "true")
+    monkeypatch.setenv("UVICORN_WORKERS", "4")
+    monkeypatch.setenv("UVICORN_PORT", "9999")
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
     artifact_path = tmp_path / "artifact"
 
     child_environment = serving_e2e_smoke._child_environment(
@@ -88,6 +112,8 @@ def test_child_environment_scrubs_inherited_urbanflow_settings(
     )
 
     assert child_environment["UNRELATED_SETTING"] == "kept"
+    assert not any(key.startswith("UVICORN_") for key in child_environment)
+    assert "WEB_CONCURRENCY" not in child_environment
     assert {
         key: value for key, value in child_environment.items() if key.startswith("URBANFLOW_")
     } == {
@@ -216,6 +242,22 @@ def test_startup_failures_raise_safe_error_with_only_a_bounded_log_tail(
     assert secret_url not in message
     assert "secret" not in message
     assert str(artifact_path) not in message
+
+
+def test_log_tail_redacts_secret_split_across_truncation_boundary() -> None:
+    secret_url = "postgresql+psycopg://user:boundary-secret@localhost/urbanflow"
+    split_at = secret_url.index("boundary-secret")
+    suffix_length = serving_e2e_smoke._MAX_LOG_TAIL_CHARS - (len(secret_url) - split_at)
+    log = io.BytesIO(("prefix\n" + secret_url + ("z" * suffix_length)).encode())
+
+    tail = serving_e2e_smoke._safe_log_tail(
+        log,
+        sensitive_values=(secret_url,),
+    )
+
+    assert len(tail) <= serving_e2e_smoke._MAX_LOG_TAIL_CHARS
+    assert "boundary-secret" not in tail
+    assert "localhost/urbanflow" not in tail
 
 
 @pytest.mark.parametrize(
@@ -351,6 +393,17 @@ def test_http_assertion_failure_still_closes_and_cleans_every_created_resource()
         )
 
     assert "secret" not in str(exc_info.value)
+    rendered_exception = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+        )
+    )
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert "secret" not in rendered_exception
+    assert "postgresql" not in rendered_exception
     assert fake_client.closed is True
     assert fake_log.closed is True
     assert temporary_paths and all(not path.exists() for path in temporary_paths)
@@ -373,6 +426,8 @@ def test_http_assertion_failure_still_closes_and_cleans_every_created_resource()
         "127.0.0.1",
         "--port",
         "45678",
+        "--workers",
+        "1",
     ]
     child_environment = captured_process_arguments["env"]
     assert isinstance(child_environment, dict)

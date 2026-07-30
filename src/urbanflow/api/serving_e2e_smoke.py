@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -49,6 +50,7 @@ _STARTUP_POLL_INTERVAL_SECONDS = 0.1
 _HTTP_POLL_TIMEOUT_SECONDS = 1.0
 _PROCESS_STOP_TIMEOUT_SECONDS = 10.0
 _MAX_LOG_TAIL_CHARS = 2_000
+_LOG_REDACTION_CONTEXT_CHARS = 256
 
 
 class ServingE2ESmokeError(RuntimeError):
@@ -164,7 +166,9 @@ def _run_serving_e2e_smoke(
     process: _Process | None = None
     client: DashboardApiClient | None = None
     schema_created = False
-    cleanup_error: Exception | None = None
+    failure_message: str | None = None
+    cleanup_failed = False
+    result: ServingE2ESmokeResult | None = None
 
     try:
         engine = resolved_engine_factory(database_url)
@@ -197,6 +201,8 @@ def _run_serving_e2e_smoke(
             "127.0.0.1",
             "--port",
             str(port),
+            "--workers",
+            "1",
         ]
         log_file = resolved_temporary_log_factory()
         process = resolved_process_factory(
@@ -217,47 +223,49 @@ def _run_serving_e2e_smoke(
         )
         client = resolved_client_factory(base_url)
         result = resolved_response_assertion(client, fixture, schema)
-    except ServingE2ESmokeError:
-        raise
-    except Exception as exc:
-        raise ServingE2ESmokeError("Configured serving smoke failed.") from exc
+    except ServingE2ESmokeError as exc:
+        failure_message = str(exc)
+    except Exception:
+        failure_message = "Configured serving smoke failed."
     finally:
         if client is not None:
             try:
                 client.close()
-            except Exception as exc:
-                cleanup_error = cleanup_error or exc
+            except Exception:
+                cleanup_failed = True
         if process is not None:
             try:
                 _stop_process(process)
-            except Exception as exc:
-                cleanup_error = cleanup_error or exc
+            except Exception:
+                cleanup_failed = True
         if log_file is not None:
             try:
                 log_file.close()
-            except Exception as exc:
-                cleanup_error = cleanup_error or exc
+            except Exception:
+                cleanup_failed = True
         if engine is not None and schema_created:
             try:
                 with engine.begin() as connection:
                     connection.exec_driver_sql(f"DROP SCHEMA IF EXISTS {quoted_schema} CASCADE")
-            except Exception as exc:
-                cleanup_error = cleanup_error or exc
+            except Exception:
+                cleanup_failed = True
         if engine is not None:
             try:
                 engine.dispose()
-            except Exception as exc:
-                cleanup_error = cleanup_error or exc
+            except Exception:
+                cleanup_failed = True
         if temporary_directory is not None:
             try:
                 temporary_directory.cleanup()
-            except Exception as exc:
-                cleanup_error = cleanup_error or exc
-        if cleanup_error is not None and sys.exc_info()[0] is None:
-            raise ServingE2ESmokeError(
-                "Configured serving smoke cleanup failed."
-            ) from cleanup_error
+            except Exception:
+                cleanup_failed = True
 
+    if failure_message is not None:
+        raise ServingE2ESmokeError(failure_message)
+    if cleanup_failed:
+        raise ServingE2ESmokeError("Configured serving smoke cleanup failed.")
+    if result is None:
+        raise ServingE2ESmokeError("Configured serving smoke failed.")
     return result
 
 
@@ -271,16 +279,42 @@ def _quote_identifier(identifier: str) -> str:
 
 def _schema_database_url(database_url: str, schema: str) -> str:
     validated_schema = postgres_smoke.validate_smoke_schema_name(schema)
-    child_url = make_url(database_url).update_query_dict(
-        {"options": f"-csearch_path={validated_schema}"}
-    )
+    child_url = make_url(database_url)
+    existing_options = child_url.query.get("options", "")
+    option_values = (existing_options,) if isinstance(existing_options, str) else existing_options
+    preserved_tokens: list[str] = []
+    for value in option_values:
+        preserved_tokens.extend(_without_search_path(shlex.split(value)))
+    options = shlex.join([*preserved_tokens, f"-csearch_path={validated_schema}"])
+    child_url = child_url.update_query_dict({"options": options})
     return child_url.render_as_string(hide_password=False)
+
+
+def _without_search_path(tokens: list[str]) -> list[str]:
+    preserved: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if (
+            token == "-c"
+            and index + 1 < len(tokens)
+            and tokens[index + 1].split("=", 1)[0] == "search_path"
+        ):
+            index += 2
+            continue
+        assignment = token[2:] if token.startswith("-c") else token.removeprefix("--")
+        if assignment.split("=", 1)[0] == "search_path":
+            index += 1
+            continue
+        preserved.append(token)
+        index += 1
+    return preserved
 
 
 def _child_environment(child_database_url: str, artifact_path: Path) -> dict[str, str]:
     environment = os.environ.copy()
     for key in tuple(environment):
-        if key.startswith("URBANFLOW_"):
+        if key.startswith("URBANFLOW_") or key.startswith("UVICORN_") or key == "WEB_CONCURRENCY":
             del environment[key]
     environment.update(
         {
@@ -345,9 +379,18 @@ def _safe_log_tail(
     log_file.flush()
     log_file.seek(0, os.SEEK_END)
     size = log_file.tell()
-    log_file.seek(max(0, size - _MAX_LOG_TAIL_CHARS))
-    tail = log_file.read(_MAX_LOG_TAIL_CHARS).decode("utf-8", errors="replace")
-    for value in sensitive_values:
+    redactions = _expanded_sensitive_values(sensitive_values)
+    overlap = (
+        max(
+            (len(value.encode("utf-8")) for value in redactions),
+            default=0,
+        )
+        + _LOG_REDACTION_CONTEXT_CHARS
+    )
+    read_size = _MAX_LOG_TAIL_CHARS + overlap
+    log_file.seek(max(0, size - read_size))
+    tail = log_file.read(read_size).decode("utf-8", errors="replace")
+    for value in redactions:
         if value:
             tail = tail.replace(value, "[redacted]")
     tail = re.sub(
@@ -366,6 +409,20 @@ def _safe_log_tail(
         tail,
     )
     return tail[-_MAX_LOG_TAIL_CHARS:].strip() or "<empty>"
+
+
+def _expanded_sensitive_values(
+    sensitive_values: tuple[str, ...],
+) -> tuple[str, ...]:
+    redactions = {value for value in sensitive_values if value}
+    for value in tuple(redactions):
+        try:
+            password = make_url(value).password
+        except Exception:
+            continue
+        if password:
+            redactions.add(password)
+    return tuple(sorted(redactions, key=len, reverse=True))
 
 
 def _temporary_log_file() -> BinaryIO:
