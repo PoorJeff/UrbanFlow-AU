@@ -265,7 +265,12 @@ def parse_max_data_age(environ: Mapping[str, str]) -> timedelta | None:
         ) from exc
     if hours <= 0 or raw_value.strip() != str(hours):
         raise ApiRuntimeConfigError(f"Invalid {API_MAX_DATA_AGE_HOURS_ENV_VAR} configuration.")
-    return timedelta(hours=hours)
+    try:
+        return timedelta(hours=hours)
+    except OverflowError as exc:
+        raise ApiRuntimeConfigError(
+            f"Invalid {API_MAX_DATA_AGE_HOURS_ENV_VAR} configuration."
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)

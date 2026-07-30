@@ -183,9 +183,9 @@ python scripts/smoke_test_serving_e2e.py
 ```
 
 It creates and removes an isolated schema and a temporary local artifact,
-starts only a temporary loopback Uvicorn process, and makes no network request.
-It does not start Streamlit, does not run in CI, and cleans up its temporary
-resources when the command finishes.
+starts only a temporary loopback Uvicorn process, and makes no external network
+request; all smoke HTTP stays on loopback. It does not start Streamlit, does not
+run in CI, and cleans up its temporary resources when the command finishes.
 
 This first serving slice introduces no model registry, retraining, Dashboard,
 monitoring, Docker packaging, or production-performance claim.

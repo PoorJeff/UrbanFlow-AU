@@ -57,6 +57,15 @@ class ServingE2ESmokeError(RuntimeError):
     """Raised when configured API serving does not satisfy the smoke contract."""
 
 
+class _SmokeDashboardApiClient(DashboardApiClient):
+    def __init__(self, base_url: str) -> None:
+        self._owned_http_client = httpx.Client(trust_env=False)
+        super().__init__(base_url, http_client=self._owned_http_client)
+
+    def close(self) -> None:
+        self._owned_http_client.close()
+
+
 class _Process(Protocol):
     def poll(self) -> int | None: ...
 
@@ -156,7 +165,7 @@ def _run_serving_e2e_smoke(
     resolved_sleep = sleep or time.sleep
     resolved_free_port_allocator = free_port_allocator or _allocate_free_port
     resolved_http_poller = http_poller or _poll_health
-    resolved_client_factory = client_factory or DashboardApiClient
+    resolved_client_factory = client_factory or _SmokeDashboardApiClient
     resolved_response_assertion = response_assertion or _assert_serving_responses
     resolved_temporary_log_factory = temporary_log_factory or _temporary_log_file
 
@@ -363,12 +372,38 @@ def _wait_for_api_ready(
 def _stop_process(process: _Process) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    stop_error: Exception | None = None
     try:
-        process.wait(timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+        process.terminate()
+    except Exception as exc:
+        stop_error = exc
+    else:
+        try:
+            process.wait(timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception as exc:
+            stop_error = exc
+        else:
+            return
+
+    try:
+        still_running = process.poll() is None
+    except Exception as exc:
+        if stop_error is None:
+            stop_error = exc
+        still_running = True
+
+    if still_running:
+        try:
+            process.kill()
+            process.wait(timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+        except Exception as exc:
+            if stop_error is None:
+                stop_error = exc
+
+    if stop_error is not None:
+        raise RuntimeError("Configured serving process cleanup failed.") from stop_error
 
 
 def _safe_log_tail(
@@ -445,7 +480,8 @@ def _allocate_free_port() -> int:
 
 def _poll_health(health_url: str, timeout_seconds: float) -> bool:
     try:
-        response = httpx.get(health_url, timeout=timeout_seconds)
+        with httpx.Client(trust_env=False) as http_client:
+            response = http_client.get(health_url, timeout=timeout_seconds)
     except httpx.RequestError:
         return False
     return response.status_code == 200

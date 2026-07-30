@@ -73,6 +73,11 @@ def test_parse_max_data_age_rejects_invalid_positive_integer_hours(value: str) -
         parse_max_data_age({API_MAX_DATA_AGE_HOURS_ENV_VAR: value})
 
 
+def test_parse_max_data_age_rejects_positive_integer_that_overflows_timedelta() -> None:
+    with pytest.raises(ApiRuntimeConfigError, match="URBANFLOW_API_MAX_DATA_AGE_HOURS"):
+        parse_max_data_age({API_MAX_DATA_AGE_HOURS_ENV_VAR: "9" * 1_000})
+
+
 def test_runtime_health_without_a_repository_reports_unconfigured_data_components() -> None:
     health = RuntimeHealthService(
         data_readiness_repository=None,

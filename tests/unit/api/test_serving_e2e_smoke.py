@@ -275,6 +275,81 @@ def test_log_tail_drops_unknown_credential_fragment_from_incomplete_first_line()
     assert tail == "[truncated]\nfinal safe log line"
 
 
+def test_health_polling_ignores_proxy_environment_and_closes_its_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[object] = []
+
+    class FakeHttpClient:
+        closed = False
+
+        def __enter__(self) -> FakeHttpClient:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self.closed = True
+
+        def get(self, url: str, *, timeout: float) -> SimpleNamespace:
+            assert url == "http://127.0.0.1:45678/health"
+            assert timeout == 1.0
+            return SimpleNamespace(status_code=200)
+
+    def http_client_factory(**kwargs: object) -> FakeHttpClient:
+        assert kwargs == {"trust_env": False}
+        client = FakeHttpClient()
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setenv("ALL_PROXY", "socks5://proxy.invalid:1080")
+    monkeypatch.setattr(serving_e2e_smoke.httpx, "Client", http_client_factory)
+    monkeypatch.setattr(
+        serving_e2e_smoke.httpx,
+        "get",
+        lambda *_args, **_kwargs: pytest.fail("module-level HTTP inherited proxy settings"),
+    )
+
+    assert (
+        serving_e2e_smoke._poll_health(
+            "http://127.0.0.1:45678/health",
+            1.0,
+        )
+        is True
+    )
+    assert len(created_clients) == 1
+    assert created_clients[0].closed is True
+
+
+def test_dashboard_smoke_client_ignores_proxy_environment_and_closes_owned_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[object] = []
+
+    class FakeHttpClient:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    def http_client_factory(**kwargs: object) -> FakeHttpClient:
+        assert kwargs == {"trust_env": False}
+        client = FakeHttpClient()
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setenv("ALL_PROXY", "socks5://proxy.invalid:1080")
+    monkeypatch.setattr(serving_e2e_smoke.httpx, "Client", http_client_factory)
+
+    client = serving_e2e_smoke._SmokeDashboardApiClient("http://127.0.0.1:45678")
+    client.close()
+
+    assert len(created_clients) == 1
+    assert created_clients[0].closed is True
+
+
 @pytest.mark.parametrize(
     ("stops_after_terminate", "expected_events"),
     [
@@ -306,6 +381,52 @@ def test_process_cleanup_terminates_then_bounded_waits_and_kills_only_if_needed(
 
     serving_e2e_smoke._stop_process(FakeProcess())
 
+    assert events == expected_events
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_events"),
+    [
+        ("terminate", ["terminate", "kill", ("wait", 10.0)]),
+        (
+            "wait",
+            ["terminate", ("wait", 10.0), "kill", ("wait", 10.0)],
+        ),
+    ],
+)
+def test_process_cleanup_hard_stops_after_unexpected_soft_stop_exceptions(
+    failure_stage: str,
+    expected_events: list[object],
+) -> None:
+    events: list[object] = []
+
+    class FakeProcess:
+        alive = True
+
+        def poll(self) -> int | None:
+            return None if self.alive else 0
+
+        def terminate(self) -> None:
+            events.append("terminate")
+            if failure_stage == "terminate":
+                raise OSError("terminate failed")
+
+        def wait(self, timeout: float) -> int:
+            events.append(("wait", timeout))
+            if failure_stage == "wait" and "kill" not in events:
+                raise OSError("wait failed")
+            self.alive = False
+            return 0
+
+        def kill(self) -> None:
+            events.append("kill")
+
+    process = FakeProcess()
+
+    with pytest.raises(RuntimeError, match="process cleanup failed"):
+        serving_e2e_smoke._stop_process(process)
+
+    assert process.alive is False
     assert events == expected_events
 
 

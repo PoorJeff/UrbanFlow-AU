@@ -640,9 +640,9 @@ python scripts/smoke_test_serving_e2e.py
 ~~~
 
 Explain that it creates and removes an isolated schema and a temporary local
-artifact, starts only temporary Uvicorn, makes no network request, does not
-start Streamlit, does not run in CI, and never uses the normal database URL as
-a fallback.
+artifact, starts only temporary Uvicorn, makes no external network request
+because all smoke HTTP stays on loopback, does not start Streamlit, does not run
+in CI, and never uses the normal database URL as a fallback.
 
 - [ ] **Step 2: Review scope and run focused documentation checks**
 
