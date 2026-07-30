@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -108,3 +108,11 @@ class PostgresSensorHistoryRepository:
             )
             for fact in reversed(facts)
         ]
+
+    def get_latest_observed_at(self) -> datetime | None:
+        statement = select(func.max(PedestrianHourlyFact.observed_at))
+        try:
+            with self._session_factory() as session:
+                return session.scalar(statement)
+        except SQLAlchemyError as exc:
+            raise DataStoreUnavailableError("sensor data is unavailable") from exc

@@ -63,6 +63,12 @@ class FakeSession:
         self.scalar_result = FakeScalarResult(self._rows, result_error=self._result_error)
         return self.scalar_result
 
+    def scalar(self, statement: object) -> object | None:
+        self.statements.append(statement)
+        if self._scalars_error is not None:
+            raise self._scalars_error
+        return self._rows[0] if self._rows else None
+
 
 RepositoryCall = Callable[[PostgresSensorHistoryRepository], object]
 
@@ -230,6 +236,24 @@ def test_get_recent_history_queries_newest_rows_and_returns_them_ascending() -> 
     assert session.closed
 
 
+def test_get_latest_observed_at_returns_aware_maximum_and_uses_max_query() -> None:
+    cutoff = datetime(2026, 7, 30, 9, tzinfo=UTC)
+    session = FakeSession([cutoff])
+
+    result = _repository(session).get_latest_observed_at()
+
+    assert result == cutoff
+    assert "max(pedestrian_hourly_fact.observed_at)" in _compile(session.statements[0])
+    assert session.closed
+
+
+def test_get_latest_observed_at_returns_none_for_empty_table() -> None:
+    session = FakeSession([])
+
+    assert _repository(session).get_latest_observed_at() is None
+    assert session.closed
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -249,6 +273,10 @@ def test_get_recent_history_queries_newest_rows_and_returns_them_ascending() -> 
         pytest.param(
             lambda repository: repository.get_recent_history(101, limit=168),
             id="get_recent_history",
+        ),
+        pytest.param(
+            lambda repository: repository.get_latest_observed_at(),
+            id="get_latest_observed_at",
         ),
     ],
 )
@@ -281,6 +309,10 @@ def test_public_methods_translate_session_factory_failures(call: RepositoryCall)
         pytest.param(
             lambda repository: repository.get_recent_history(101, limit=168),
             id="get_recent_history",
+        ),
+        pytest.param(
+            lambda repository: repository.get_latest_observed_at(),
+            id="get_latest_observed_at",
         ),
     ],
 )
