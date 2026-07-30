@@ -49,6 +49,32 @@ The unversioned health probe is available at
 documentation at `http://127.0.0.1:8000/docs` and the raw schema at
 `http://127.0.0.1:8000/openapi.json`.
 
+### Health readiness
+
+`GET /health` reports the running API process together with the configured
+data store, data freshness, and model provider. Its HTTP result is a runtime
+readiness signal:
+
+| Situation | Component result | Overall result |
+| --- | --- | --- |
+| No database URL | data store, freshness, and model provider are `unconfigured` | `degraded` (200) |
+| Readable database, age threshold unset | data store is `available`; freshness is `unconfigured`; model provider reflects artifact configuration | `degraded` (200) |
+| Readable, fresh database and valid artifact | all four components are `available` | `ok` (200) |
+| Stale, empty, or future-dated database observation | data store is `available`; freshness is `unavailable`; model provider reflects artifact configuration | `degraded` (200) |
+| Unreadable database | data store and freshness are `unavailable`; model provider reflects artifact configuration | `unavailable` (503) |
+| Invalid configured artifact | model provider is `unavailable`; data-store and freshness results still reflect the database | `degraded` (200), unless the database is unreadable |
+
+Set `URBANFLOW_API_MAX_DATA_AGE_HOURS` to require the latest database
+observation to be no older than that many elapsed UTC hours. It is optional:
+when unset or blank, freshness is not configured. When set, it must be a
+canonical positive integer such as `24`; zero, negative, non-integer, or other
+malformed values make app construction fail with a configuration error.
+
+`data_cutoff_at` is the latest observation timestamp actually read from the
+database; it is never a model-training cutoff. Even `health.status == "ok"`
+does not guarantee that every sensor has the 168 contiguous input rows (or
+other request-specific conditions) required to generate a forecast.
+
 Business routes are versioned under `/api/v1`:
 
 ```powershell
@@ -145,6 +171,21 @@ prediction.
 disposable PostgreSQL schema and temporary local artifact. It is not part of
 routine tests and requires an intentionally configured
 `URBANFLOW_SMOKE_DATABASE_URL`.
+
+### Run the configured serving smoke manually
+
+The configured-serving smoke requires an explicit database URL and never falls
+back to `URBANFLOW_DATABASE_URL`:
+
+```powershell
+$env:URBANFLOW_SMOKE_DATABASE_URL = "postgresql+psycopg://urbanflow:urbanflow@localhost:5432/urbanflow"
+python scripts/smoke_test_serving_e2e.py
+```
+
+It creates and removes an isolated schema and a temporary local artifact,
+starts only a temporary loopback Uvicorn process, and makes no network request.
+It does not start Streamlit, does not run in CI, and cleans up its temporary
+resources when the command finishes.
 
 This first serving slice introduces no model registry, retraining, Dashboard,
 monitoring, Docker packaging, or production-performance claim.
