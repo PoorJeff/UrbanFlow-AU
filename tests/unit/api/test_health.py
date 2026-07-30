@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -7,7 +7,29 @@ import urbanflow
 from tests.unit.api.helpers import api_get
 from urbanflow.api.app import create_app
 from urbanflow.api.schemas import ComponentHealth, HealthComponents, HealthResult
-from urbanflow.api.services import ApiServices
+from urbanflow.api.services import (
+    API_MAX_DATA_AGE_HOURS_ENV_VAR,
+    ApiRuntimeConfigError,
+    ApiServices,
+    DataStoreUnavailableError,
+    RuntimeHealthService,
+    parse_max_data_age,
+)
+
+
+class FakeReadinessRepository:
+    def __init__(self, cutoff: datetime | None = None, error: Exception | None = None) -> None:
+        self.cutoff = cutoff
+        self.error = error
+
+    def get_latest_observed_at(self) -> datetime | None:
+        if self.error is not None:
+            raise self.error
+        return self.cutoff
+
+
+def fixed_now() -> datetime:
+    return datetime(2026, 7, 30, 12, tzinfo=UTC)
 
 
 def components(
@@ -23,6 +45,163 @@ def components(
         data_store=ComponentHealth(status=data_store),
         data_freshness=ComponentHealth(status=data_freshness),
     )
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({}, None),
+        ({API_MAX_DATA_AGE_HOURS_ENV_VAR: ""}, None),
+        ({API_MAX_DATA_AGE_HOURS_ENV_VAR: "   "}, None),
+        ({API_MAX_DATA_AGE_HOURS_ENV_VAR: "1"}, timedelta(hours=1)),
+        ({API_MAX_DATA_AGE_HOURS_ENV_VAR: "24"}, timedelta(hours=24)),
+    ],
+)
+def test_parse_max_data_age_uses_only_the_passed_mapping(
+    environ: dict[str, str],
+    expected: timedelta | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(API_MAX_DATA_AGE_HOURS_ENV_VAR, "48")
+
+    assert parse_max_data_age(environ) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "not-a-number"])
+def test_parse_max_data_age_rejects_invalid_positive_integer_hours(value: str) -> None:
+    with pytest.raises(ApiRuntimeConfigError, match="URBANFLOW_API_MAX_DATA_AGE_HOURS"):
+        parse_max_data_age({API_MAX_DATA_AGE_HOURS_ENV_VAR: value})
+
+
+def test_runtime_health_without_a_repository_reports_unconfigured_data_components() -> None:
+    health = RuntimeHealthService(
+        data_readiness_repository=None,
+        model_provider_status="unconfigured",
+        model_version=None,
+        max_data_age=None,
+        now=fixed_now,
+    )()
+
+    assert health.status == "degraded"
+    assert health.components.data_store.status == "unconfigured"
+    assert health.components.data_freshness.status == "unconfigured"
+    assert health.data_cutoff_at is None
+
+
+def test_runtime_health_reports_ok_for_fresh_aware_data_and_an_available_model() -> None:
+    cutoff = datetime(2026, 7, 30, 11, tzinfo=UTC)
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(cutoff),
+        model_provider_status="available",
+        model_version="lightgbm-demo-v1",
+        max_data_age=timedelta(hours=2),
+        now=fixed_now,
+    )()
+
+    assert health.status == "ok"
+    assert health.components.data_store.status == "available"
+    assert health.components.data_freshness.status == "available"
+    assert health.model_version == "lightgbm-demo-v1"
+    assert health.data_cutoff_at == cutoff
+
+
+def test_runtime_health_reports_stale_aware_data_as_unavailable_freshness() -> None:
+    cutoff = datetime(2026, 7, 30, 9, tzinfo=UTC)
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(cutoff),
+        model_provider_status="available",
+        model_version="lightgbm-demo-v1",
+        max_data_age=timedelta(hours=2),
+        now=fixed_now,
+    )()
+
+    assert health.status == "degraded"
+    assert health.components.data_store.status == "available"
+    assert health.components.data_freshness.status == "unavailable"
+    assert health.data_cutoff_at == cutoff
+
+
+def test_runtime_health_reports_aware_data_without_a_threshold_as_unconfigured_freshness() -> None:
+    cutoff = datetime(2026, 7, 30, 11, tzinfo=UTC)
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(cutoff),
+        model_provider_status="available",
+        model_version="lightgbm-demo-v1",
+        max_data_age=None,
+        now=fixed_now,
+    )()
+
+    assert health.status == "degraded"
+    assert health.components.data_store.status == "available"
+    assert health.components.data_freshness.status == "unconfigured"
+    assert health.data_cutoff_at == cutoff
+
+
+def test_runtime_health_reports_missing_cutoff_as_unavailable_freshness() -> None:
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(),
+        model_provider_status="available",
+        model_version="lightgbm-demo-v1",
+        max_data_age=timedelta(hours=2),
+        now=fixed_now,
+    )()
+
+    assert health.status == "degraded"
+    assert health.components.data_store.status == "available"
+    assert health.components.data_freshness.status == "unavailable"
+    assert health.data_cutoff_at is None
+
+
+def test_runtime_health_reports_data_store_failure_as_unavailable() -> None:
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(
+            error=DataStoreUnavailableError("database unavailable")
+        ),
+        model_provider_status="available",
+        model_version="lightgbm-demo-v1",
+        max_data_age=timedelta(hours=2),
+        now=fixed_now,
+    )()
+
+    assert health.status == "unavailable"
+    assert health.components.data_store.status == "unavailable"
+    assert health.components.data_freshness.status == "unavailable"
+    assert health.data_cutoff_at is None
+
+
+@pytest.mark.parametrize(
+    "cutoff",
+    [
+        datetime(2026, 7, 30, 11),
+        datetime(2026, 7, 30, 13, tzinfo=UTC),
+    ],
+)
+def test_runtime_health_does_not_return_naive_or_future_cutoffs(cutoff: datetime) -> None:
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(cutoff),
+        model_provider_status="available",
+        model_version="lightgbm-demo-v1",
+        max_data_age=timedelta(hours=2),
+        now=fixed_now,
+    )()
+
+    assert health.status == "degraded"
+    assert health.components.data_store.status == "available"
+    assert health.components.data_freshness.status == "unavailable"
+    assert health.data_cutoff_at is None
+
+
+def test_runtime_health_keeps_readable_data_store_degraded_when_model_is_unavailable() -> None:
+    health = RuntimeHealthService(
+        data_readiness_repository=FakeReadinessRepository(datetime(2026, 7, 30, 11, tzinfo=UTC)),
+        model_provider_status="unavailable",
+        model_version=None,
+        max_data_age=timedelta(hours=2),
+        now=fixed_now,
+    )()
+
+    assert health.status == "degraded"
+    assert health.components.data_store.status == "available"
 
 
 def test_default_health_is_degraded_when_optional_components_are_unconfigured() -> None:

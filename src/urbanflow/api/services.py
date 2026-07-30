@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,14 +20,17 @@ from urbanflow.api.errors import (
 )
 from urbanflow.api.schemas import (
     ComponentHealth,
+    ComponentStatus,
     FinalTestWindowResponse,
     HealthComponents,
     HealthResult,
     ModelMetricsResponse,
     ModelMetricValues,
 )
+from urbanflow.validation.reports import utc_now
 
 API_SERVICE_NAME = "urbanflow-au-api"
+API_MAX_DATA_AGE_HOURS_ENV_VAR = "URBANFLOW_API_MAX_DATA_AGE_HOURS"
 MAX_HISTORY_RANGE = timedelta(days=31)
 SUPPORTED_MODEL_COMPARISON_KEYS = {
     "ridge_wape": "ridge",
@@ -37,6 +40,10 @@ SUPPORTED_MODEL_COMPARISON_KEYS = {
 
 class HealthService(Protocol):
     def __call__(self) -> HealthResult: ...
+
+
+class DataReadinessRepository(Protocol):
+    def get_latest_observed_at(self) -> datetime | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +113,10 @@ class ModelMetadataProvider(Protocol):
 
 class DataStoreUnavailableError(RuntimeError):
     """Raised by a configured API repository when its backing store cannot be read."""
+
+
+class ApiRuntimeConfigError(ValueError):
+    """Raised when API runtime configuration is invalid."""
 
 
 class ForecastInputUnavailableError(RuntimeError):
@@ -242,6 +253,88 @@ def default_health() -> HealthResult:
     )
 
 
+def parse_max_data_age(environ: Mapping[str, str]) -> timedelta | None:
+    raw_value = environ.get(API_MAX_DATA_AGE_HOURS_ENV_VAR)
+    if raw_value is None or not raw_value.strip():
+        return None
+    try:
+        hours = int(raw_value)
+    except ValueError as exc:
+        raise ApiRuntimeConfigError(
+            f"Invalid {API_MAX_DATA_AGE_HOURS_ENV_VAR} configuration."
+        ) from exc
+    if hours <= 0 or raw_value.strip() != str(hours):
+        raise ApiRuntimeConfigError(f"Invalid {API_MAX_DATA_AGE_HOURS_ENV_VAR} configuration.")
+    return timedelta(hours=hours)
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeHealthService:
+    data_readiness_repository: DataReadinessRepository | None
+    model_provider_status: ComponentStatus
+    model_version: str | None
+    max_data_age: timedelta | None
+    now: Callable[[], datetime] = utc_now
+
+    def __call__(self) -> HealthResult:
+        raw_now = self.now()
+        current_time = _utc_if_aware(raw_now)
+        generated_at = current_time or utc_now()
+        data_store_status: ComponentStatus = "unconfigured"
+        data_freshness_status: ComponentStatus = "unconfigured"
+        data_cutoff_at: datetime | None = None
+
+        if self.data_readiness_repository is not None:
+            try:
+                observed_at = self.data_readiness_repository.get_latest_observed_at()
+            except DataStoreUnavailableError:
+                data_store_status = "unavailable"
+                data_freshness_status = "unavailable"
+            else:
+                data_store_status = "available"
+                normalized_cutoff = _utc_if_aware(observed_at) if observed_at else None
+                if normalized_cutoff is None or current_time is None:
+                    data_freshness_status = "unavailable"
+                elif normalized_cutoff > current_time:
+                    data_freshness_status = "unavailable"
+                else:
+                    data_cutoff_at = normalized_cutoff
+                    if self.max_data_age is None:
+                        data_freshness_status = "unconfigured"
+                    elif current_time - normalized_cutoff <= self.max_data_age:
+                        data_freshness_status = "available"
+                    else:
+                        data_freshness_status = "unavailable"
+
+        status = (
+            "unavailable"
+            if data_store_status == "unavailable"
+            else (
+                "ok"
+                if (
+                    self.model_provider_status == "available"
+                    and data_store_status == "available"
+                    and data_freshness_status == "available"
+                )
+                else "degraded"
+            )
+        )
+        return HealthResult(
+            status=status,
+            service=API_SERVICE_NAME,
+            version=__version__,
+            generated_at=generated_at,
+            components=HealthComponents(
+                api_process=ComponentHealth(status="available"),
+                model_provider=ComponentHealth(status=self.model_provider_status),
+                data_store=ComponentHealth(status=data_store_status),
+                data_freshness=ComponentHealth(status=data_freshness_status),
+            ),
+            model_version=self.model_version,
+            data_cutoff_at=data_cutoff_at,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ApiServices:
     health: HealthService = default_health
@@ -290,6 +383,12 @@ def _validate_history_range(*, start: datetime, end: datetime) -> None:
 
 def _is_timezone_aware(value: datetime) -> bool:
     return value.tzinfo is not None and value.utcoffset() is not None
+
+
+def _utc_if_aware(value: datetime) -> datetime | None:
+    if not _is_timezone_aware(value):
+        return None
+    return value.astimezone(UTC)
 
 
 def _ensure_sensor_exists(sensor_repository: SensorRepository, location_id: int) -> None:
