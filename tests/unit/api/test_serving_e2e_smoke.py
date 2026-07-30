@@ -260,6 +260,21 @@ def test_log_tail_redacts_secret_split_across_truncation_boundary() -> None:
     assert "localhost/urbanflow" not in tail
 
 
+def test_log_tail_drops_unknown_credential_fragment_from_incomplete_first_line() -> None:
+    credential_fragment = "unlisted-boundary-secret"
+    credential_value = credential_fragment * 300
+    log = io.BytesIO(f"password={credential_value}\nfinal safe log line\n".encode())
+
+    tail = serving_e2e_smoke._safe_log_tail(
+        log,
+        sensitive_values=(),
+    )
+
+    assert len(tail) <= serving_e2e_smoke._MAX_LOG_TAIL_CHARS
+    assert credential_fragment not in tail
+    assert tail == "[truncated]\nfinal safe log line"
+
+
 @pytest.mark.parametrize(
     ("stops_after_terminate", "expected_events"),
     [

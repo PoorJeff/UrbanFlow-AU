@@ -388,8 +388,14 @@ def _safe_log_tail(
         + _LOG_REDACTION_CONTEXT_CHARS
     )
     read_size = _MAX_LOG_TAIL_CHARS + overlap
-    log_file.seek(max(0, size - read_size))
+    read_start = max(0, size - read_size)
+    log_file.seek(read_start)
     tail = log_file.read(read_size).decode("utf-8", errors="replace")
+    was_truncated = read_start > 0
+    if was_truncated:
+        _, separator, tail = tail.partition("\n")
+        if not separator:
+            tail = ""
     for value in redactions:
         if value:
             tail = tail.replace(value, "[redacted]")
@@ -408,6 +414,8 @@ def _safe_log_tail(
         "[redacted-path]",
         tail,
     )
+    if was_truncated:
+        tail = f"[truncated]\n{tail}"
     return tail[-_MAX_LOG_TAIL_CHARS:].strip() or "<empty>"
 
 
