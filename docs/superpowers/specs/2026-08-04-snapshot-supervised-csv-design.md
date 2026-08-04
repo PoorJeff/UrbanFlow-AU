@@ -194,12 +194,14 @@ could not write supervised CSV: <path>
 The new unit suite uses only temporary CSV/JSON fixtures and has no network,
 PostgreSQL, MLflow server, or model-artifact dependency. It proves:
 
-1. A valid 200-hour single-sensor snapshot produces exactly `200 * 24` direct
-   horizon rows; all generated rows retain the expected calendar and
-   all-weather-missing features.
-2. The resulting CSV round-trips through `read_supervised_csv`, preserving
-   offset-aware timestamps and UTC instants across a Melbourne daylight-saving
-   boundary.
+1. A valid 200-hour single-sensor snapshot beginning outside a Melbourne
+   daylight-saving transition produces exactly `200 * 24` direct horizon rows;
+   all generated rows retain the expected calendar and all-weather-missing
+   features.
+2. A dedicated Melbourne fall-back fixture preserves the feature builder's
+   extra missing repeated-hour origin instead of filtering it to match source
+   row count; its resulting CSV round-trips through `read_supervised_csv`,
+   preserving offset-aware timestamps and UTC instants.
 3. All eight manifest fields are enforced before output creation, including
    SHA-256, row count, schema/dataset, timestamp, count types, and provenance
    text. A stale stored provenance path is deliberately accepted when the

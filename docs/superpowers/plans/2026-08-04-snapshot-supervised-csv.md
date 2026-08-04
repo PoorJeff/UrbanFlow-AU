@@ -45,11 +45,11 @@
 
 - [ ] **Step 1: Write the failing core-builder tests**
 
-Create helpers that write a valid City of Melbourne CSV, its matching schema-v1 manifest, and an explicit holiday calendar. The manifest fixture must carry all eight v1 fields: `schema_version`, `dataset`, `source_url`, `extracted_at`, `record_count`, `source_total_count`, `snapshot_path`, and lowercase `snapshot_sha256`. Use 200 complete hourly rows for one location so the expected output is `200 * 24 == 4800` rows and `4500` rows have non-missing targets.
+Create helpers that write a valid City of Melbourne CSV, its matching schema-v1 manifest, and an explicit holiday calendar. The manifest fixture must carry all eight v1 fields: `schema_version`, `dataset`, `source_url`, `extracted_at`, `record_count`, `source_total_count`, `snapshot_path`, and lowercase `snapshot_sha256`. Use 200 complete hourly rows for one location beginning at a Melbourne date outside a daylight-saving transition (for example, `2025-05-01 00:00`) so the expected output is `200 * 24 == 4800` rows and `4500` rows have non-missing targets.
 
 ```python
 def write_hourly_snapshot(tmp_path: Path, *, periods: int = 200) -> Path:
-    timestamps = pd.date_range("2025-04-01 00:00", periods=periods, freq="h")
+    timestamps = pd.date_range("2025-05-01 00:00", periods=periods, freq="h")
     frame = pd.DataFrame(
         {
             "id": [f"101{stamp:%Y%m%d%H}" for stamp in timestamps],
@@ -92,7 +92,8 @@ Add focused tests for all of the following:
 - Spy on `Path.read_bytes` and `pandas.read_csv` to prove the builder reads and parses the hourly-count CSV exactly once; mutate the raw file after writing its manifest and assert the mismatch creates neither a temporary nor destination output.
 - Reject non-object or malformed JSON, each missing required manifest field, wrong schema/dataset, blank `source_url` or stored `snapshot_path`, an invalid `extracted_at`, boolean/negative counts, invalid lowercase SHA format, and SHA/row-count mismatch. Every case must produce the stable mismatch error and no output. Accept unrelated extra/`metadata` fields, and do **not** compare `source_total_count` with `record_count`.
 - Prove worktree relocation: a manifest whose stored `snapshot_path` is stale/deleted succeeds when the supplied snapshot bytes match; the implementation must not read or resolve that stored path.
-- Cover hard schema and direction-total validation errors, header-only/empty frames, duplicate sensor-hour warning, a missing source hour that produces a missing marker, and holiday coverage ending before the final target date.
+- Cover hard schema and direction-total validation errors, header-only/empty frames, duplicate sensor-hour warning, a missing source hour that produces a missing marker, and holiday coverage ending before the final target date. For the May fixture, a calendar ending on `2025-05-09` covers every source/origin date but must fail because the last direct targets reach `2025-05-10`.
+- Add a dedicated Melbourne fall-back fixture beginning `2025-04-01 00:00`: retain the feature builder's extra missing repeated-hour origin rather than filtering it, so the output has `4824` rows, `4500` non-missing targets, and a UTC-aware missing-marker row at the repeated hour.
 - Prove an already existing destination remains byte-for-byte unchanged; simulate `to_csv`, round-trip, and `os.link` failures and verify no temporary sibling remains. Simulate a destination appearing at publish time and assert it is not overwritten.
 
 Run:
