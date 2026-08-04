@@ -113,8 +113,7 @@ def test_ingest_hourly_counts_scopes_snapshot_and_manifest_to_location(
     )
 
     expected_where = (
-        "sensing_date >= date'2025-01-01' AND sensing_date <= date'2025-01-01' "
-        "AND location_id = 51"
+        "sensing_date >= date'2025-01-01' AND sensing_date <= date'2025-01-01' AND location_id = 51"
     )
     assert fake_client.count_calls == [(HOURLY_COUNTS_SOURCE_DATASET, expected_where)]
     assert fake_client.export_calls[0][:3] == (

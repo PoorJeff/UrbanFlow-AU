@@ -121,9 +121,7 @@ def ingest_hourly_counts(
             },
             "selected_columns": list(HOURLY_COUNT_COLUMNS),
             "sensor_filter": (
-                "all"
-                if validated_location_id is None
-                else {"location_id": validated_location_id}
+                "all" if validated_location_id is None else {"location_id": validated_location_id}
             ),
             "snapshot_format": "csv",
             "source_dataset": HOURLY_COUNTS_SOURCE_DATASET,
