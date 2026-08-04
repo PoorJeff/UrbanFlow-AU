@@ -140,13 +140,14 @@ def _write_new_supervised_csv(supervised: pd.DataFrame, output_path: Path) -> No
         with temporary_file:
             supervised.to_csv(temporary_file, index=False)
         read_supervised_csv(temporary_path)
-        os.link(temporary_path, output_path)
+        try:
+            os.link(temporary_path, output_path)
+        except FileExistsError as exc:
+            raise SupervisedSnapshotBuildError(
+                f"supervised CSV output already exists: {output_path}"
+            ) from exc
         temporary_path.unlink()
         temporary_path = None
-    except FileExistsError as exc:
-        raise SupervisedSnapshotBuildError(
-            f"supervised CSV output already exists: {output_path}"
-        ) from exc
     except (OSError, SupervisedCsvError) as exc:
         raise SupervisedSnapshotWriteError(
             f"could not write supervised CSV: {output_path}"

@@ -304,6 +304,42 @@ def test_builder_rejects_empty_snapshot_before_output_creation(tmp_path: Path) -
     assert_no_output_or_temp(output)
 
 
+@pytest.mark.parametrize("contents", [b"\xff", b'"unterminated'])
+def test_builder_rejects_unreadable_snapshot_before_output_creation(
+    tmp_path: Path, contents: bytes
+) -> None:
+    snapshot = tmp_path / "records.csv"
+    snapshot.write_bytes(contents)
+    manifest = tmp_path / "source.json"
+    manifest.write_text("{}", encoding="utf-8")
+    output = tmp_path / "supervised.csv"
+
+    with pytest.raises(SupervisedSnapshotBuildError, match="could not read hourly-count snapshot"):
+        build(snapshot, manifest, output, write_calendar(tmp_path))
+
+    assert_no_output_or_temp(output)
+
+
+def test_builder_rejects_parser_error_before_output_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = write_hourly_snapshot(tmp_path)
+    manifest = write_matching_manifest(snapshot, tmp_path / "source.json")
+    output = tmp_path / "supervised.csv"
+    import urbanflow.modeling.supervised_dataset as module
+
+    monkeypatch.setattr(
+        module.pd,
+        "read_csv",
+        lambda *args, **kwargs: (_ for _ in ()).throw(pd.errors.ParserError("bad CSV")),
+    )
+
+    with pytest.raises(SupervisedSnapshotBuildError, match="could not read hourly-count snapshot"):
+        build(snapshot, manifest, output, write_calendar(tmp_path))
+
+    assert_no_output_or_temp(output)
+
+
 def test_builder_rejects_duplicate_sensor_hour(tmp_path: Path) -> None:
     snapshot = write_hourly_snapshot(tmp_path)
     frame = pd.read_csv(snapshot)
