@@ -52,11 +52,25 @@ def year_date_range(year: int) -> HourlyCountDateRange:
     )
 
 
-def build_hourly_counts_where(date_range: HourlyCountDateRange) -> str:
-    return (
+def validate_location_id(location_id: int | None) -> int | None:
+    if location_id is None:
+        return None
+    if type(location_id) is not int or location_id <= 0:
+        raise HourlyCountIngestionError("location_id must be a positive integer")
+    return location_id
+
+
+def build_hourly_counts_where(
+    date_range: HourlyCountDateRange, *, location_id: int | None = None
+) -> str:
+    where = (
         f"sensing_date >= date'{date_range.start_date.isoformat()}' "
         f"AND sensing_date <= date'{date_range.end_date.isoformat()}'"
     )
+    validated_location_id = validate_location_id(location_id)
+    if validated_location_id is not None:
+        where += f" AND location_id = {validated_location_id}"
+    return where
 
 
 def count_csv_data_rows(csv_path: Path) -> int:

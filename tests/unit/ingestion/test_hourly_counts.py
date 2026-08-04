@@ -10,6 +10,7 @@ from urbanflow.ingestion.hourly_counts import (
     count_csv_data_rows,
     parse_iso_date,
     validate_date_range,
+    validate_location_id,
     year_date_range,
 )
 
@@ -43,6 +44,30 @@ def test_build_hourly_counts_where_uses_inclusive_dates() -> None:
         build_hourly_counts_where(date_range)
         == "sensing_date >= date'2025-01-01' AND sensing_date <= date'2025-01-31'"
     )
+
+
+def test_build_hourly_counts_where_limits_to_location() -> None:
+    date_range = HourlyCountDateRange(
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 5, 31),
+    )
+
+    assert (
+        build_hourly_counts_where(date_range, location_id=101)
+        == "sensing_date >= date'2025-01-01' AND sensing_date <= date'2025-05-31' "
+        "AND location_id = 101"
+    )
+
+
+def test_validate_location_id_returns_optional_positive_integer() -> None:
+    assert validate_location_id(None) is None
+    assert validate_location_id(101) == 101
+
+
+@pytest.mark.parametrize("location_id", [0, -1, True, False, "101", 101.0])
+def test_validate_location_id_rejects_invalid_values(location_id: object) -> None:
+    with pytest.raises(HourlyCountIngestionError, match="positive integer"):
+        validate_location_id(location_id)
 
 
 def test_count_csv_data_rows_counts_rows_after_header(tmp_path) -> None:
