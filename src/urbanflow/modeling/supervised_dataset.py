@@ -128,13 +128,15 @@ def _require_calendar_coverage(supervised: pd.DataFrame, holiday_calendar: Holid
 
 def _write_new_supervised_csv(supervised: pd.DataFrame, output_path: Path) -> None:
     temporary_path: Path | None = None
+    descriptor: int | None = None
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, raw_temporary_path = tempfile.mkstemp(
             prefix=f".{output_path.name}-", dir=output_path.parent
         )
-        os.close(descriptor)
         temporary_path = Path(raw_temporary_path)
+        os.close(descriptor)
+        descriptor = None
         supervised.to_csv(temporary_path, index=False)
         read_supervised_csv(temporary_path)
         os.link(temporary_path, output_path)
@@ -149,6 +151,11 @@ def _write_new_supervised_csv(supervised: pd.DataFrame, output_path: Path) -> No
             f"could not write supervised CSV: {output_path}"
         ) from exc
     finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         if temporary_path is not None and os.path.lexists(temporary_path):
             try:
                 temporary_path.unlink()

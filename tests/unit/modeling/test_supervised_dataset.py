@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -168,6 +169,13 @@ def test_manifest_mismatch_after_snapshot_mutation_creates_no_output(tmp_path: P
     "mutate",
     [
         lambda payload: payload.pop("schema_version"),
+        lambda payload: payload.pop("dataset"),
+        lambda payload: payload.pop("source_url"),
+        lambda payload: payload.pop("extracted_at"),
+        lambda payload: payload.pop("record_count"),
+        lambda payload: payload.pop("source_total_count"),
+        lambda payload: payload.pop("snapshot_path"),
+        lambda payload: payload.pop("snapshot_sha256"),
         lambda payload: payload.update(schema_version=True),
         lambda payload: payload.update(schema_version=2),
         lambda payload: payload.update(dataset="other"),
@@ -329,9 +337,13 @@ def test_builder_requires_calendar_through_final_target_date(tmp_path: Path) -> 
     snapshot = write_hourly_snapshot(tmp_path)
     manifest = write_matching_manifest(snapshot, tmp_path / "source.json")
     output = tmp_path / "supervised.csv"
+    calendar = write_calendar(tmp_path, end="2025-05-09")
+
+    assert calendar.contains(date(2025, 5, 9))
+    assert not calendar.contains(date(2025, 5, 10))
 
     with pytest.raises(SupervisedSnapshotBuildError, match="holiday calendar does not cover"):
-        build(snapshot, manifest, output, write_calendar(tmp_path, end="2025-04-09"))
+        build(snapshot, manifest, output, calendar)
 
     assert_no_output_or_temp(output)
 
@@ -375,6 +387,33 @@ def test_write_failure_removes_temporary_file(
     with pytest.raises(SupervisedSnapshotWriteError, match="could not write supervised CSV"):
         build(snapshot, manifest, output, write_calendar(tmp_path))
 
+    assert_no_output_or_temp(output)
+
+
+def test_close_failure_removes_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = write_hourly_snapshot(tmp_path)
+    manifest = write_matching_manifest(snapshot, tmp_path / "source.json")
+    output = tmp_path / "supervised.csv"
+    import urbanflow.modeling.supervised_dataset as module
+
+    original_close = module.os.close
+    close_calls = 0
+
+    def fail_once(descriptor: int) -> None:
+        nonlocal close_calls
+        close_calls += 1
+        if close_calls == 1:
+            raise OSError("close failed")
+        original_close(descriptor)
+
+    monkeypatch.setattr(module.os, "close", fail_once)
+
+    with pytest.raises(SupervisedSnapshotWriteError, match="could not write supervised CSV"):
+        build(snapshot, manifest, output, write_calendar(tmp_path))
+
+    assert close_calls == 2
     assert_no_output_or_temp(output)
 
 
