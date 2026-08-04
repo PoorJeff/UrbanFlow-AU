@@ -135,9 +135,10 @@ def _write_new_supervised_csv(supervised: pd.DataFrame, output_path: Path) -> No
             prefix=f".{output_path.name}-", dir=output_path.parent
         )
         temporary_path = Path(raw_temporary_path)
-        os.close(descriptor)
+        temporary_file = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
         descriptor = None
-        supervised.to_csv(temporary_path, index=False)
+        with temporary_file:
+            supervised.to_csv(temporary_file, index=False)
         read_supervised_csv(temporary_path)
         os.link(temporary_path, output_path)
         temporary_path.unlink()

@@ -390,7 +390,7 @@ def test_write_failure_removes_temporary_file(
     assert_no_output_or_temp(output)
 
 
-def test_close_failure_removes_temporary_file(
+def test_descriptor_ownership_failure_removes_temporary_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     snapshot = write_hourly_snapshot(tmp_path)
@@ -398,22 +398,15 @@ def test_close_failure_removes_temporary_file(
     output = tmp_path / "supervised.csv"
     import urbanflow.modeling.supervised_dataset as module
 
-    original_close = module.os.close
-    close_calls = 0
-
-    def fail_once(descriptor: int) -> None:
-        nonlocal close_calls
-        close_calls += 1
-        if close_calls == 1:
-            raise OSError("close failed")
-        original_close(descriptor)
-
-    monkeypatch.setattr(module.os, "close", fail_once)
+    monkeypatch.setattr(
+        module.os,
+        "fdopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("fdopen failed")),
+    )
 
     with pytest.raises(SupervisedSnapshotWriteError, match="could not write supervised CSV"):
         build(snapshot, manifest, output, write_calendar(tmp_path))
 
-    assert close_calls == 2
     assert_no_output_or_temp(output)
 
 
