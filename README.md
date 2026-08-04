@@ -255,9 +255,22 @@ defaults.
 python scripts/ingest_hourly_counts.py --year 2025
 ```
 
-The command downloads a bounded City of Melbourne hourly-count CSV export and
-prints a JSON summary. Use `--year YYYY` for a full calendar year, or provide
-both `--start-date YYYY-MM-DD` and `--end-date YYYY-MM-DD` for a smaller range.
+The command above downloads an unfiltered, year-wide City of Melbourne
+hourly-count CSV export and prints a JSON summary. For a bounded historical
+export from exactly one sensor, provide a date range and its location ID:
+
+```powershell
+python scripts/ingest_hourly_counts.py --start-date 2025-01-01 --end-date 2025-05-31 --location-id 101
+```
+
+`--location-id` restricts the source query to exactly one sensor, while
+`--start-date` and `--end-date` bound the historical window. A successful
+export proves only snapshot acquisition and provenance; it does not prove that
+the snapshot contains 168 contiguous hourly observations or that it is valid
+for a forecast.
+
+Use `--year YYYY` for a full calendar year, or provide both
+`--start-date YYYY-MM-DD` and `--end-date YYYY-MM-DD` for a smaller range.
 There is no unbounded default because the source has million-row scale. By
 default the command writes an immutable CSV snapshot below `data/raw/` and a
 matching manifest below `data/manifests/`; both are ignored by Git.

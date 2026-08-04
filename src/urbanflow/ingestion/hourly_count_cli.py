@@ -18,6 +18,7 @@ from urbanflow.ingestion.hourly_counts import (
     HourlyCountIngestionError,
     parse_iso_date,
     validate_date_range,
+    validate_location_id,
     year_date_range,
 )
 from urbanflow.ingestion.melbourne_api import MelbourneApiClient, MelbourneApiError
@@ -33,6 +34,15 @@ def positive_year(value: str) -> int:
     return year
 
 
+def positive_location_id(value: str) -> int:
+    try:
+        location_id = int(value)
+        validate_location_id(location_id)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("location_id must be a positive integer") from exc
+    return location_id
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ingest Melbourne hourly pedestrian counts.")
     parser.add_argument("--raw-root", type=Path, default=Path("data/raw"))
@@ -40,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--year", type=positive_year)
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
+    parser.add_argument(
+        "--location-id",
+        metavar="LOCATION_ID",
+        type=positive_location_id,
+    )
     return parser
 
 
@@ -60,13 +75,14 @@ def date_range_from_args(args: argparse.Namespace) -> HourlyCountDateRange:
     return validate_date_range(parse_iso_date(args.start_date), parse_iso_date(args.end_date))
 
 
-def result_summary(result: HourlyCountIngestionResult) -> dict[str, int | str | dict[str, str]]:
+def result_summary(result: HourlyCountIngestionResult) -> dict[str, object]:
     return {
         "date_range": {
             "end": result.date_range.end_date.isoformat(),
             "start": result.date_range.start_date.isoformat(),
         },
         "extracted_at": result.extracted_at.isoformat(),
+        "location_id": result.location_id,
         "manifest_path": result.manifest_path.as_posix(),
         "record_count": result.record_count,
         "snapshot_path": result.snapshot_path.as_posix(),
@@ -101,6 +117,7 @@ def main(
                 raw_root_dir=args.raw_root,
                 manifest_root_dir=args.manifest_root,
                 date_range=date_range,
+                location_id=args.location_id,
             )
     except (HourlyCountIngestionError, MelbourneApiError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
