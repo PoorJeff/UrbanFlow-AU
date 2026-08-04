@@ -66,11 +66,10 @@ def test_validate_location_id_returns_optional_positive_integer() -> None:
 
 @pytest.mark.parametrize("location_id", [0, -1, True, False, "101", 101.0])
 def test_validate_location_id_rejects_invalid_values(location_id: object) -> None:
-    with pytest.raises(
-        HourlyCountIngestionError,
-        match=r"^location_id must be a positive integer$",
-    ):
+    with pytest.raises(HourlyCountIngestionError) as exc_info:
         validate_location_id(location_id)
+
+    assert str(exc_info.value) == "location_id must be a positive integer"
 
 
 def test_count_csv_data_rows_counts_rows_after_header(tmp_path) -> None:
