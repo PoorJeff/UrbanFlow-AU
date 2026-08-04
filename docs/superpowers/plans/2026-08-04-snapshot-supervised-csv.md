@@ -4,7 +4,7 @@
 
 **Goal:** Add an opt-in, offline CLI that turns one manifest-verified City of Melbourne hourly-count snapshot into a safely written direct `1..24`-hour supervised CSV for the existing evaluation and LightGBM artifact commands.
 
-**Architecture:** A small modeling module reads immutable bytes once through an additive snapshot-reader helper, verifies the matching ingestion manifest and validates that exact in-memory DataFrame, maps source fields through the established Melbourne-time conversion, then delegates all feature generation to `build_supervised_frame`. A thin CLI parses local paths and preserves the project’s existing `0`/`2`/`1` success, input-error, and write-error convention.
+**Architecture:** A small modeling module reads immutable source bytes exactly once, parses and validates that exact in-memory DataFrame, verifies the matching ingestion manifest, maps source fields through the established Melbourne-time conversion, then delegates all feature generation to `build_supervised_frame`. A thin CLI parses local paths and preserves the project’s existing `0`/`2`/`1` success, input-error, and write-error convention.
 
 **Tech Stack:** Python 3.12, pandas, existing Pandera validation, `zoneinfo` Melbourne conversion, argparse, pytest, Ruff.
 
@@ -16,7 +16,7 @@
 - Use the exact snapshot bytes for both SHA-256 provenance and the DataFrame that is validated and converted; reject a mismatched manifest before output creation.
 - Preserve source `DUPLICATE_SOURCE_ID` and `INCOMPLETE_HOUR_COVERAGE` as warnings, but reject `DUPLICATE_SENSOR_HOUR` because the feature input contract forbids duplicate sensor-time rows.
 - The holiday calendar must cover every generated `target_observed_at` local date, including the final 24 target hours.
-- Output CSVs are new local files only: never overwrite an existing destination, write through a temporary sibling, validate timestamp round-trip, and remove temporary files on failure.
+- Output CSVs are new local files only: never overwrite an existing destination, write through a temporary sibling, validate timestamp round-trip, publish with same-directory non-overwriting `os.link`, and remove temporary files on failure.
 - Generated data and artifacts remain under ignored `data/processed/` and `models/`; no snapshot, credential, artifact, or evaluation output is committed.
 - CI and ordinary pytest remain network-, PostgreSQL-, MLflow-, and artifact-free.
 
@@ -26,30 +26,26 @@
 
 | Path | Change | Responsibility |
 | --- | --- | --- |
-| `src/urbanflow/validation/snapshot_readers.py` | Modify | Add a byte-stable hourly-count reader while preserving the existing `read_hourly_counts_snapshot(path)` API. |
 | `src/urbanflow/modeling/supervised_dataset.py` | Create | Manifest verification, same-frame validation, canonical observation conversion, calendar coverage check, atomic CSV output, and result metadata. |
-| `tests/unit/validation/test_snapshot_readers.py` | Modify | Prove the new reader returns the same parsed frame and exact source bytes. |
 | `tests/unit/modeling/test_supervised_dataset.py` | Create | Cover provenance, conversion, warning/error policy, calendar coverage, timestamp round-trip, and write cleanup. |
 | `src/urbanflow/modeling/supervised_dataset_cli.py` | Create | Argparse boundary, JSON serialization, and stable error-to-exit-code mapping. |
 | `scripts/build_supervised_csv.py` | Create | Minimal executable wrapper. |
 | `tests/unit/modeling/test_supervised_dataset_cli.py` | Create | CLI stdout/stderr/exit-code and wrapper-help coverage. |
 | `README.md` | Modify | Document the local bridge and state that it is not data download, database loading, training, or serving. |
 
-## Task 1: Byte-stable snapshot reader and core supervised dataset builder
+## Task 1: Core supervised dataset builder
 
 **Files:**
 - Create: `src/urbanflow/modeling/supervised_dataset.py`
-- Modify: `src/urbanflow/validation/snapshot_readers.py`
-- Modify: `tests/unit/validation/test_snapshot_readers.py`
 - Create: `tests/unit/modeling/test_supervised_dataset.py`
 
 **Interfaces:**
-- Consumes: `read_hourly_counts_snapshot_with_bytes`, `validate_hourly_counts_frame`, `melbourne_observed_at`, `build_supervised_frame`, `HolidayCalendar`, and `read_supervised_csv`.
+- Consumes: `validate_hourly_counts_frame`, `melbourne_observed_at`, `build_supervised_frame`, `HolidayCalendar`, and `read_supervised_csv`.
 - Produces: `SupervisedSnapshotBuildError`, `SupervisedSnapshotWriteError`, `SupervisedSnapshotBuildResult`, and `build_supervised_csv_from_hourly_snapshot(snapshot_path, manifest_path, output_path, *, holiday_calendar)`.
 
-- [ ] **Step 1: Write the failing byte-reader and core-builder tests**
+- [ ] **Step 1: Write the failing core-builder tests**
 
-Create helpers that write a valid City of Melbourne CSV, its matching schema-v1 manifest, and an explicit holiday calendar. Use 200 complete hourly rows for one location so the expected output is `200 * 24 == 4800` rows and `4500` rows have non-missing targets.
+Create helpers that write a valid City of Melbourne CSV, its matching schema-v1 manifest, and an explicit holiday calendar. The manifest fixture must carry all eight v1 fields: `schema_version`, `dataset`, `source_url`, `extracted_at`, `record_count`, `source_total_count`, `snapshot_path`, and lowercase `snapshot_sha256`. Use 200 complete hourly rows for one location so the expected output is `200 * 24 == 4800` rows and `4500` rows have non-missing targets.
 
 ```python
 def write_hourly_snapshot(tmp_path: Path, *, periods: int = 200) -> Path:
@@ -91,47 +87,23 @@ def test_builder_writes_direct_rows_from_a_verified_snapshot(tmp_path: Path) -> 
     assert round_tripped["temperature_missing"].all()
 ```
 
-Add focused tests for: byte-reader returns the raw bytes used to parse the frame; manifest SHA/row-count/dataset mismatch; hard schema and direction-total validation errors; duplicate sensor-hour warning; a missing source hour that produces a missing marker; holiday coverage ending before the final target date; an already existing destination whose bytes remain unchanged; and `to_csv`/`Path.replace` failures that leave no temporary sibling.
+Add focused tests for all of the following:
+
+- Spy on `Path.read_bytes` and `pandas.read_csv` to prove the builder reads and parses the hourly-count CSV exactly once; mutate the raw file after writing its manifest and assert the mismatch creates neither a temporary nor destination output.
+- Reject non-object or malformed JSON, each missing required manifest field, wrong schema/dataset, blank `source_url` or stored `snapshot_path`, an invalid `extracted_at`, boolean/negative counts, invalid lowercase SHA format, and SHA/row-count mismatch. Every case must produce the stable mismatch error and no output. Accept unrelated extra/`metadata` fields, and do **not** compare `source_total_count` with `record_count`.
+- Prove worktree relocation: a manifest whose stored `snapshot_path` is stale/deleted succeeds when the supplied snapshot bytes match; the implementation must not read or resolve that stored path.
+- Cover hard schema and direction-total validation errors, header-only/empty frames, duplicate sensor-hour warning, a missing source hour that produces a missing marker, and holiday coverage ending before the final target date.
+- Prove an already existing destination remains byte-for-byte unchanged; simulate `to_csv`, round-trip, and `os.link` failures and verify no temporary sibling remains. Simulate a destination appearing at publish time and assert it is not overwritten.
 
 Run:
 
 ```powershell
-& .\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_snapshot_readers.py tests/unit/modeling/test_supervised_dataset.py -v
+& .\.venv\Scripts\python.exe -m pytest tests/unit/modeling/test_supervised_dataset.py -v
 ```
 
-Expected: FAIL because `read_hourly_counts_snapshot_with_bytes` and `urbanflow.modeling.supervised_dataset` do not exist.
+Expected: FAIL because `urbanflow.modeling.supervised_dataset` does not exist.
 
-- [ ] **Step 2: Add the byte-stable hourly-count reader without changing existing callers**
-
-In `src/urbanflow/validation/snapshot_readers.py`, factor the existing hourly CSV parsing into an additive helper. Keep `read_hourly_counts_snapshot(path)` as its current public entry point, returning only the DataFrame.
-
-```python
-from io import BytesIO
-
-
-def read_hourly_counts_snapshot_with_bytes(snapshot_path: Path) -> tuple[pd.DataFrame, bytes]:
-    _ensure_existing_file(snapshot_path)
-    try:
-        source_bytes = snapshot_path.read_bytes()
-    except OSError as exc:
-        raise SnapshotReadError(f"Could not read CSV snapshot: {snapshot_path}") from exc
-    try:
-        frame = pd.read_csv(BytesIO(source_bytes), dtype=str, keep_default_na=False)
-    except pd.errors.EmptyDataError as exc:
-        raise SnapshotReadError(f"CSV snapshot is empty: {snapshot_path}") from exc
-    except UnicodeDecodeError as exc:
-        raise SnapshotReadError(f"Could not decode CSV snapshot: {snapshot_path}") from exc
-    return frame, source_bytes
-
-
-def read_hourly_counts_snapshot(snapshot_path: Path) -> pd.DataFrame:
-    frame, _ = read_hourly_counts_snapshot_with_bytes(snapshot_path)
-    return frame
-```
-
-Retain the existing malformed-CSV exception mapping while using `BytesIO` so the returned bytes and DataFrame are inseparable for the new builder.
-
-- [ ] **Step 3: Implement the core builder and its precise error policy**
+- [ ] **Step 2: Implement the core builder and its precise error policy**
 
 Create `src/urbanflow/modeling/supervised_dataset.py` with these public types and imports.
 
@@ -156,14 +128,22 @@ class SupervisedSnapshotBuildResult:
     snapshot_sha256: str
 ```
 
-Implement `build_supervised_csv_from_hourly_snapshot` in this exact order:
+Keep raw-byte and manifest helpers private to this new module; do not modify
+`snapshot_readers.py`, reuse `sha256_file`, or call a validator that re-reads a
+path. Implement `build_supervised_csv_from_hourly_snapshot` in this exact order:
 
 ```python
-frame, source_bytes = read_hourly_counts_snapshot_with_bytes(snapshot_path)
-snapshot_sha256 = hashlib.sha256(source_bytes).hexdigest()
+if os.path.lexists(output_path):
+    raise SupervisedSnapshotBuildError(
+        f"supervised CSV output already exists: {output_path}"
+    )
+manifest = _load_hourly_count_manifest(manifest_path)
+frame, snapshot_sha256 = _read_hourly_counts_snapshot_once(snapshot_path)
 _verify_hourly_count_manifest(
-    manifest_path, snapshot_sha256=snapshot_sha256, source_row_count=len(frame)
+    manifest, snapshot_sha256=snapshot_sha256, source_row_count=len(frame)
 )
+if frame.empty:
+    raise SupervisedSnapshotBuildError("hourly-count snapshot contains no rows")
 report = validate_hourly_counts_frame(frame, snapshot_path=snapshot_path)
 if report.errors:
     codes = ", ".join(issue.code for issue in report.errors)
@@ -180,18 +160,28 @@ _require_calendar_coverage(supervised, holiday_calendar)
 _write_new_supervised_csv(supervised, output_path)
 ```
 
-Translate a `SnapshotReadError` from the byte-stable reader into
-`SupervisedSnapshotBuildError(str(exc))` before any manifest or output work, so
-missing, unreadable, empty, or undecodable source files are operator input
-errors rather than CLI crashes.
+`_read_hourly_counts_snapshot_once(path)` must use one `path.read_bytes()` call,
+calculate `hashlib.sha256(source_bytes).hexdigest()`, and parse those same bytes
+using `pd.read_csv(BytesIO(source_bytes), dtype=str, keep_default_na=False)`.
+Map `OSError`, `UnicodeError`, `pandas.errors.EmptyDataError`, and
+`pandas.errors.ParserError` to `SupervisedSnapshotBuildError` before output work,
+so missing, unreadable, empty, undecodable, or malformed source files are
+operator input errors rather than CLI crashes.
 
-`_verify_hourly_count_manifest` must load UTF-8 JSON and reject a non-object,
-schema version other than integer `1`, dataset other than `hourly_counts`, a
-blank `source_url`, an extraction timestamp that does not parse with
-`%Y%m%dT%H%M%SZ`, a non-integer `record_count`, or a SHA/row-count mismatch.
-All of those failures raise `SupervisedSnapshotBuildError` with the stable text
-`hourly-count manifest does not match snapshot` where the exact field is not
-safe or useful to expose.
+`_load_hourly_count_manifest` must load UTF-8 JSON and map `OSError`,
+`UnicodeError`, and `json.JSONDecodeError` to the stable manifest-mismatch
+error.
+`_verify_hourly_count_manifest` must require all eight v1 fields, reject a
+non-object, require `schema_version` to be a plain non-boolean integer exactly
+equal to `1`, require `dataset == "hourly_counts"`, require non-empty string
+`source_url` and `snapshot_path`, parse `extracted_at` strictly with
+`%Y%m%dT%H%M%SZ`, require non-boolean non-negative integer `record_count` and
+`source_total_count`, and require a lowercase 64-hex `snapshot_sha256`. Compare
+only `record_count` with the parsed frame length and `snapshot_sha256` with the
+digest from the single byte read. Do not compare `source_total_count` with
+`record_count`, resolve or access the stored `snapshot_path`, or reject
+`metadata`/other extra fields. All malformed or mismatched manifest conditions
+raise `SupervisedSnapshotBuildError("hourly-count manifest does not match snapshot")`.
 
 `_observations_from_hourly_count_frame` must construct only `location_id`,
 `observed_at`, and `pedestrian_count`; call `melbourne_observed_at` for every
@@ -212,31 +202,36 @@ if not all(holiday_calendar.contains(value) for value in target_dates):
     )
 ```
 
-For output, refuse `os.path.lexists(output_path)`, make its parent, create a
-temporary sibling with `tempfile.mkstemp`, close its descriptor, call
-`supervised.to_csv(temp_path, index=False)`, call `read_supervised_csv(temp_path)`,
-then `temp_path.replace(output_path)`. Translate an `OSError` or
-`SupervisedCsvError` after input validation into
+For output, reject `os.path.lexists(output_path)` before work, make its parent,
+then create a `tempfile.mkstemp` sibling in that same parent and close its
+descriptor. Call `supervised.to_csv(temp_path, index=False)` and
+`read_supervised_csv(temp_path)`. Publish only with
+`os.link(temp_path, output_path)`, which atomically fails with `FileExistsError`
+if a competing process created the destination; never use `Path.replace` or
+`rename`, because they can overwrite on some platforms. On successful link,
+unlink the temporary sibling. Map `FileExistsError` to
+`SupervisedSnapshotBuildError(f"supervised CSV output already exists: {output_path}")`;
+map other `OSError` or `SupervisedCsvError` after input validation to
 `SupervisedSnapshotWriteError(f"could not write supervised CSV: {output_path}")`.
 Always unlink the temporary path in `finally` when it still exists.
 
-- [ ] **Step 4: Run the focused core suite and inspect the diff**
+- [ ] **Step 3: Run the focused core suite and inspect the diff**
 
 Run:
 
 ```powershell
-& .\.venv\Scripts\python.exe -m pytest tests/unit/validation/test_snapshot_readers.py tests/unit/modeling/test_supervised_dataset.py -v
-& .\.venv\Scripts\python.exe -m ruff check src/urbanflow/validation/snapshot_readers.py src/urbanflow/modeling/supervised_dataset.py tests/unit/validation/test_snapshot_readers.py tests/unit/modeling/test_supervised_dataset.py
-& .\.venv\Scripts\python.exe -m ruff format --check src/urbanflow/validation/snapshot_readers.py src/urbanflow/modeling/supervised_dataset.py tests/unit/validation/test_snapshot_readers.py tests/unit/modeling/test_supervised_dataset.py
+& .\.venv\Scripts\python.exe -m pytest tests/unit/modeling/test_supervised_dataset.py -v
+& .\.venv\Scripts\python.exe -m ruff check src/urbanflow/modeling/supervised_dataset.py tests/unit/modeling/test_supervised_dataset.py
+& .\.venv\Scripts\python.exe -m ruff format --check src/urbanflow/modeling/supervised_dataset.py tests/unit/modeling/test_supervised_dataset.py
 git diff --check
 ```
 
 Expected: all focused tests pass; formatting and diff checks are clean.
 
-- [ ] **Step 5: Commit the core bridge**
+- [ ] **Step 4: Commit the core bridge**
 
 ```powershell
-git add src/urbanflow/validation/snapshot_readers.py src/urbanflow/modeling/supervised_dataset.py tests/unit/validation/test_snapshot_readers.py tests/unit/modeling/test_supervised_dataset.py
+git add src/urbanflow/modeling/supervised_dataset.py tests/unit/modeling/test_supervised_dataset.py
 git commit -m "feat(modeling): build supervised csv from snapshot"
 ```
 
@@ -253,7 +248,7 @@ git commit -m "feat(modeling): build supervised csv from snapshot"
 
 - [ ] **Step 1: Write failing CLI and wrapper tests**
 
-Use the Task 1 helpers to write valid snapshot inputs. Assert the parser requires exactly three positional paths and `--holiday-calendar`; no `--horizons`, database, network, artifact, or model option exists.
+Use the Task 1 helpers to write valid snapshot inputs. Assert the parser requires exactly three positional paths and `--holiday-calendar`; no `--horizons`, database, network, artifact, or model option exists. The 200-hour fixture intentionally has one partial final Melbourne date, so its successful validation warning count is `1` (`INCOMPLETE_HOUR_COVERAGE`), not zero.
 
 ```python
 def test_main_writes_only_json_for_a_valid_local_build(
@@ -273,7 +268,7 @@ def test_main_writes_only_json_for_a_valid_local_build(
         "source_row_count": 200,
         "supervised_row_count": 4800,
         "training_row_count": 4500,
-        "validation_warning_count": 0,
+        "validation_warning_count": 1,
     }
 ```
 
@@ -419,6 +414,6 @@ git commit -m "docs: explain snapshot supervised csv workflow"
 ## Plan self-review
 
 - [ ] Every requirement in `2026-08-04-snapshot-supervised-csv-design.md` maps to Task 1, 2, or 3: verified snapshot provenance, same-frame validation, source-field conversion, direct horizons, strict calendar coverage, warning/error policy, atomic output, local CLI, offline tests, and operator documentation.
-- [ ] Run the prescribed placeholder scan and ensure it produces no matches; remove any ambiguous instruction rather than leaving an incomplete task.
+- [ ] Run the prescribed unfinished-marker scan and ensure it produces no matches; remove any ambiguous instruction rather than leaving an incomplete task.
 - [ ] Confirm the public names are identical across tasks: `SupervisedSnapshotBuildError`, `SupervisedSnapshotWriteError`, `SupervisedSnapshotBuildResult`, `build_supervised_csv_from_hourly_snapshot`, `build_parser`, and `main`.
 - [ ] Confirm no task adds a database connection, network access, artifact creation, model training, Dashboard change, or configuration migration.
