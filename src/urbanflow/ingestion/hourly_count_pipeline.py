@@ -13,6 +13,7 @@ from urbanflow.ingestion.hourly_counts import (
     HourlyCountIngestionError,
     build_hourly_counts_where,
     count_csv_data_rows,
+    validate_location_id,
 )
 from urbanflow.ingestion.manifests import write_manifest
 from urbanflow.ingestion.melbourne_api import DatasetRecordCount
@@ -46,6 +47,7 @@ class HourlyCountIngestionResult:
     selected_columns: tuple[str, ...]
     snapshot_path: Path
     manifest_path: Path
+    location_id: int | None = None
 
 
 def ingest_hourly_counts(
@@ -55,9 +57,14 @@ def ingest_hourly_counts(
     manifest_root_dir: Path,
     date_range: HourlyCountDateRange,
     extracted_at: datetime | None = None,
+    location_id: int | None = None,
 ) -> HourlyCountIngestionResult:
+    validated_location_id = validate_location_id(location_id)
     extraction_time = extracted_at or datetime.now(UTC)
-    source_where = build_hourly_counts_where(date_range)
+    source_where = build_hourly_counts_where(
+        date_range,
+        location_id=validated_location_id,
+    )
     record_count_result = api_client.count_records(
         HOURLY_COUNTS_SOURCE_DATASET,
         where=source_where,
@@ -113,7 +120,11 @@ def ingest_hourly_counts(
                 "start": date_range.start_date.isoformat(),
             },
             "selected_columns": list(HOURLY_COUNT_COLUMNS),
-            "sensor_filter": "all",
+            "sensor_filter": (
+                "all"
+                if validated_location_id is None
+                else {"location_id": validated_location_id}
+            ),
             "snapshot_format": "csv",
             "source_dataset": HOURLY_COUNTS_SOURCE_DATASET,
             "source_where": source_where,
@@ -131,4 +142,5 @@ def ingest_hourly_counts(
         selected_columns=HOURLY_COUNT_COLUMNS,
         snapshot_path=snapshot_path,
         manifest_path=manifest_path,
+        location_id=validated_location_id,
     )

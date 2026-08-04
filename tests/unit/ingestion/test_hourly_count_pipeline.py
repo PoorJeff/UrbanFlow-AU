@@ -30,6 +30,7 @@ class FakeHourlyApiClient:
         self.total_count = total_count
         self.csv_bytes = csv_bytes
         self.count_calls: list[tuple[str, str | None]] = []
+        self.export_url_calls: list[tuple[str, str]] = []
         self.export_calls: list[tuple[str, tuple[str, ...], str | None, Path]] = []
 
     def count_records(self, dataset: str, *, where: str | None = None) -> DatasetRecordCount:
@@ -41,6 +42,7 @@ class FakeHourlyApiClient:
         )
 
     def export_url(self, dataset: str, *, export_format: str) -> str:
+        self.export_url_calls.append((dataset, export_format))
         return f"https://example.test/{dataset}/exports/{export_format}"
 
     def export_csv(
@@ -94,6 +96,61 @@ def test_ingest_hourly_counts_writes_snapshot_manifest_and_returns_metadata(
         "source_dataset": HOURLY_COUNTS_SOURCE_DATASET,
         "source_where": expected_where,
     }
+
+
+def test_ingest_hourly_counts_scopes_snapshot_and_manifest_to_location(
+    tmp_path: Path,
+) -> None:
+    fake_client = FakeHourlyApiClient(total_count=1)
+
+    result = ingest_hourly_counts(
+        api_client=fake_client,
+        raw_root_dir=tmp_path / "raw",
+        manifest_root_dir=tmp_path / "manifests",
+        date_range=DATE_RANGE,
+        extracted_at=EXTRACTED_AT,
+        location_id=51,
+    )
+
+    expected_where = (
+        "sensing_date >= date'2025-01-01' AND sensing_date <= date'2025-01-01' "
+        "AND location_id = 51"
+    )
+    assert fake_client.count_calls == [(HOURLY_COUNTS_SOURCE_DATASET, expected_where)]
+    assert fake_client.export_calls[0][:3] == (
+        HOURLY_COUNTS_SOURCE_DATASET,
+        HOURLY_COUNT_COLUMNS,
+        expected_where,
+    )
+    assert result.location_id == 51
+    assert result.snapshot_path.exists()
+    assert result.manifest_path.exists()
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["metadata"]["sensor_filter"] == {"location_id": 51}
+    assert manifest["metadata"]["source_where"] == expected_where
+
+
+def test_ingest_hourly_counts_rejects_invalid_location_before_io(tmp_path: Path) -> None:
+    fake_client = FakeHourlyApiClient(total_count=1)
+    raw_root_dir = tmp_path / "raw"
+    manifest_root_dir = tmp_path / "manifests"
+
+    with pytest.raises(HourlyCountIngestionError, match="positive integer"):
+        ingest_hourly_counts(
+            api_client=fake_client,
+            raw_root_dir=raw_root_dir,
+            manifest_root_dir=manifest_root_dir,
+            date_range=DATE_RANGE,
+            extracted_at=EXTRACTED_AT,
+            location_id=0,
+        )
+
+    assert fake_client.count_calls == []
+    assert fake_client.export_url_calls == []
+    assert fake_client.export_calls == []
+    assert not raw_root_dir.exists()
+    assert not manifest_root_dir.exists()
 
 
 def test_ingest_hourly_counts_rejects_empty_source_range(tmp_path: Path) -> None:
