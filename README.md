@@ -299,6 +299,26 @@ baselines build on the same feature and split contracts. A separate local
 exporter can fit and persist the trusted LightGBM serving bundle described
 above; database-backed training reads remain outside this slice.
 
+### Build a supervised CSV from a validated hourly snapshot
+
+The model evaluators and local LightGBM artifact exporter consume supervised
+rows, not raw City of Melbourne exports. Build those rows only from a local
+hourly-count snapshot and its matching ingestion manifest:
+
+```powershell
+python scripts/build_supervised_csv.py `
+  data/raw/melbourne/hourly_counts/extracted_at=.../records.csv `
+  data/manifests/hourly_counts/<timestamp>.json `
+  data/processed/modeling/supervised_rows.csv `
+  --holiday-calendar data/processed/modeling/holiday_calendar.json
+```
+
+The command is local and does not download data, connect to PostgreSQL, train a
+model, or create a forecast. It verifies the source manifest, preserves missing
+observations as missing feature markers, and rejects duplicate sensor-hour rows
+or a calendar that does not cover all 1–24-hour target dates. Generated outputs
+under `data/processed/` are ignored by Git.
+
 ## Train a local Ridge baseline
 
 The first trainable model slice fits a leakage-safe Ridge Regression baseline on
