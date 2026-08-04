@@ -91,12 +91,16 @@ the output is always compatible with the API's direct `1..24`-hour serving
 contract.
 
 The source manifest must be schema version `1`, declare
-`dataset == "hourly_counts"`, contain a non-empty source URL and extraction
-timestamp, and have a `record_count` and `snapshot_sha256` matching the exact
-bytes and rows read from `snapshot_path`. Its stored snapshot path remains
-provenance information rather than a machine-specific path requirement, so a
-valid ignored snapshot can be replayed from another local worktree. A mismatch
-is a hard failure; the output file must not be created.
+`dataset == "hourly_counts"`, contain non-empty source URL, extraction
+timestamp, and stored snapshot-path provenance, and carry non-boolean,
+non-negative integer `record_count` and `source_total_count` plus a lowercase
+64-hex `snapshot_sha256`. `record_count` and `snapshot_sha256` must match the
+exact bytes and rows read from `snapshot_path`; `source_total_count` is source
+provenance and is not required to equal the selected snapshot row count. Its
+stored snapshot path remains provenance information rather than a
+machine-specific path requirement, so a valid ignored snapshot can be replayed
+from another local worktree without accessing that old path. A mismatch is a
+hard failure; the output file must not be created.
 
 The holiday JSON is parsed by the existing `HolidayCalendar.from_json_file`.
 Its explicit coverage must include every local date represented by generated
@@ -121,9 +125,10 @@ class SupervisedSnapshotBuildResult:
     snapshot_sha256: str
 ```
 
-It reads the raw CSV exactly once with `read_hourly_counts_snapshot`, validates
-that same DataFrame with `validate_hourly_counts_frame`, then maps only these
-canonical observation fields:
+It reads one raw byte snapshot exactly once, parses it with the same
+hourly-count CSV semantics (`dtype=str`, `keep_default_na=False`), validates
+that same in-memory DataFrame with `validate_hourly_counts_frame`, then maps
+only these canonical observation fields:
 
 | Snapshot field | Observation field |
 | --- | --- |
@@ -153,11 +158,13 @@ authority for trainable feature validation.
 ## Safe output and CLI behavior
 
 The output CSV must be a new local path. Existing output files are never
-overwritten. The builder writes to a temporary sibling path, verifies that the
-CSV can be read back through `read_supervised_csv` with offset-aware timestamp
-columns, and replaces the intended output only after that check succeeds. Any
-write or replace failure removes the temporary file and leaves no partial
-output behind.
+overwritten, including when another process creates the destination during a
+run. The builder writes to a temporary sibling path, verifies that the CSV can
+be read back through `read_supervised_csv` with offset-aware timestamp columns,
+then publishes with same-directory non-overwriting `os.link` and removes the
+temporary sibling. It must not use `replace` or `rename`, which can overwrite on
+some platforms. Any write or publish failure removes the temporary file and
+leaves no partial output behind.
 
 On success, the CLI writes one JSON object to stdout with the result fields
 needed for operator evidence, including row counts, warning count, snapshot
@@ -169,7 +176,7 @@ identifier exists in this slice.
 | --- | --- |
 | Success | JSON / `0` |
 | Missing/unreadable snapshot or manifest, manifest mismatch, validation error, duplicate sensor-hour, invalid calendar/coverage, or existing output | `error: ...` / `2` |
-| A valid conversion that cannot be safely written or atomically replaced | `error: ...` / `1` |
+| A valid conversion that cannot be safely written or atomically published | `error: ...` / `1` |
 
 Stable error wording covers at least these conditions:
 
@@ -193,15 +200,18 @@ PostgreSQL, MLflow server, or model-artifact dependency. It proves:
 2. The resulting CSV round-trips through `read_supervised_csv`, preserving
    offset-aware timestamps and UTC instants across a Melbourne daylight-saving
    boundary.
-3. The manifest's SHA-256, row count, and dataset fields are enforced before
-   output creation.
+3. All eight manifest fields are enforced before output creation, including
+   SHA-256, row count, schema/dataset, timestamp, count types, and provenance
+   text. A stale stored provenance path is deliberately accepted when the
+   supplied snapshot bytes match, proving a snapshot can be replayed from a
+   relocated worktree.
 4. Schema/direction-total validation failures, empty/unreadable input,
    duplicate sensor-hours, invalid holiday JSON, and insufficient holiday
    coverage fail without creating output.
 5. Missing source hours produce explicit missing markers; counts are never
    filled in.
-6. Existing output is byte-for-byte unchanged after refusal; simulated write or
-   replace failure leaves no temporary artifact.
+6. Existing output is byte-for-byte unchanged after refusal; simulated write,
+   round-trip, or non-overwriting publish failure leaves no temporary artifact.
 7. The CLI returns exactly the documented JSON/exit codes, and the script
    wrapper exposes `--help`.
 
