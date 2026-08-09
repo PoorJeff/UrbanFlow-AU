@@ -15,8 +15,11 @@
 
 ## Task 2: Acquire and validate the real snapshot
 
-1. Start the installed Docker Desktop if necessary and create an isolated local
-   PostgreSQL container without adding Docker Compose files.
+1. Start the installed Docker Desktop if possible and create an isolated local
+   PostgreSQL container without adding Docker Compose files. If the engine is
+   unavailable because the host lacks a usable virtualization/WSL backend, use
+   the official EDB Windows binaries for a loopback-only disposable cluster and
+   record the fallback.
 2. Apply the existing Alembic migrations.
 3. Run the scoped Prefect flow for 2025-01-01 through 2025-05-31 with
    `location_id=1` and database loading enabled.

@@ -27,7 +27,9 @@ python -m venv .venv
 Any compatible local PostgreSQL instance can be used. The verified run used
 EDB's PostgreSQL 17.10 Windows binary archive, installed below the current
 user's local application-data directory. EDB documents these archives as a
-convenience for expert users.
+convenience for expert users. This was the documented fallback after Docker
+Desktop reported that no virtualization backend was available; no repository
+or network failure caused the fallback.
 
 ```powershell
 $runtimeRoot = Join-Path $env:LOCALAPPDATA "UrbanFlowAU"
@@ -91,6 +93,53 @@ $hourlyManifest = Get-Content -Raw $hourlyManifestPath | ConvertFrom-Json
 $hourlySnapshotPath = $hourlyManifest.snapshot_path
 ```
 
+Re-run the duplicate and continuity acceptance check against that exact
+snapshot:
+
+```powershell
+$verificationCode = @'
+import json
+import sys
+
+import pandas as pd
+
+frame = pd.read_csv(sys.argv[1])
+observed_at = pd.to_datetime(frame["sensing_date"]) + pd.to_timedelta(
+    frame["hourday"], unit="h"
+)
+keys = pd.DataFrame(
+    {"location_id": frame["location_id"].astype(int), "observed_at": observed_at}
+)
+duplicate_count = int(keys.duplicated().sum())
+ordered = observed_at.sort_values().reset_index(drop=True)
+expected = pd.date_range(ordered.iloc[0], ordered.iloc[-1], freq="h")
+tail = ordered.tail(168).reset_index(drop=True)
+tail_expected = pd.date_range(tail.iloc[0], periods=168, freq="h")
+
+assert duplicate_count == 0
+assert ordered.tolist() == expected.tolist()
+assert tail.tolist() == tail_expected.tolist()
+print(
+    json.dumps(
+        {
+            "row_count": len(frame),
+            "unique_sensor_hour_count": len(keys.drop_duplicates()),
+            "duplicate_sensor_hour_count": duplicate_count,
+            "contiguous_hour_count": len(expected),
+            "continuous_hours_at_serving_cutoff": len(tail),
+        },
+        indent=2,
+    )
+)
+'@
+.\.venv\Scripts\python.exe -c $verificationCode $hourlySnapshotPath
+```
+
+The checked-in project validation outputs are
+[`hourly_counts_validation.json`](../evidence/real-data-local-serving/hourly_counts_validation.json)
+and
+[`sensor_locations_validation.json`](../evidence/real-data-local-serving/sensor_locations_validation.json).
+
 ## 4. Build the supervised dataset
 
 The holiday input covers the full observation interval and the 2025-06-01
@@ -138,7 +187,12 @@ The verified output has 87,000 supervised rows and SHA256
 ```
 
 The three models use the same February-April validation boundaries and May
-final-test boundary. The final-test metrics are preserved in
+final-test boundary. Under the established evaluation contract, missing
+one-week-prior history removes a row only from Seasonal Naive metrics, not from
+the learned model's metrics; the reports therefore expose each row count. In
+April, the learned-model metrics use 17,280 rows and Seasonal Naive uses 17,256;
+the May final test uses the same 17,856 rows for all three models. The final-test
+metrics are preserved in
 [`evaluation_summary.json`](../evidence/real-data-local-serving/evaluation_summary.json).
 LightGBM won this particular historical final test, but the result is not a
 production performance claim.

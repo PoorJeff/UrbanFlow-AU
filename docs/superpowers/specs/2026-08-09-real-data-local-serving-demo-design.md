@@ -24,9 +24,12 @@ missing sensor-hours, and the 168-hour serving window.
   Victoria and cross-referenced by the Fair Work Ombudsman. The local calendar
   covers 2025-01-01 through 2025-06-01 so the last historical cutoff can serve
   a 24-hour forecast.
-- Use one local PostgreSQL instance. Starting the installed Docker Desktop and
-  a disposable PostgreSQL container is an execution prerequisite, not Docker
-  Compose product packaging.
+- Use one local PostgreSQL instance. Prefer the installed Docker Desktop and a
+  disposable PostgreSQL container. If the engine cannot start because the host
+  has no usable virtualization/WSL backend, use an official EDB Windows binary
+  archive in the current user's application-data directory and bind the
+  disposable cluster to loopback only. Neither route is Docker Compose product
+  packaging.
 - Keep raw snapshots, processed CSVs, PostgreSQL state, MLflow state, and model
   bundles untracked. Commit only small evidence summaries, reports, screenshots,
   and reproducibility documentation.
