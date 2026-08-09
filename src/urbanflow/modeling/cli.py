@@ -19,8 +19,13 @@ from urbanflow.modeling.feature_matrix import ModelTrainingError
 from urbanflow.modeling.metrics import RegressionMetrics
 from urbanflow.modeling.ridge import RidgeModelConfig
 from urbanflow.modeling.splits import SplitConfigError, build_rolling_origin_splits
+from urbanflow.modeling.supervised_csv import (
+    TIMESTAMP_COLUMNS,
+    SupervisedCsvError,
+    read_supervised_csv,
+)
 
-TIMESTAMP_COLUMNS = ("forecast_origin_at", "target_observed_at")
+EVALUATION_TIMEZONE = "Australia/Melbourne"
 
 
 class RidgeEvaluationCliError(ValueError):
@@ -64,22 +69,10 @@ def _positive_float(value: float, *, name: str) -> float:
 
 
 def _read_supervised_csv(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise RidgeEvaluationCliError(f"CSV file does not exist: {path}")
     try:
-        frame = pd.read_csv(path)
-    except (OSError, pd.errors.ParserError) as exc:
-        raise RidgeEvaluationCliError(f"could not read supervised CSV: {path}") from exc
-
-    for column in TIMESTAMP_COLUMNS:
-        if column in frame.columns:
-            try:
-                frame[column] = pd.to_datetime(frame[column])
-            except (TypeError, ValueError) as exc:
-                raise RidgeEvaluationCliError(
-                    f"could not parse timestamp column: {column}"
-                ) from exc
-    return frame
+        return read_supervised_csv(path)
+    except SupervisedCsvError as exc:
+        raise RidgeEvaluationCliError(str(exc)) from exc
 
 
 def _json_scalar(value: object) -> object:
@@ -169,6 +162,9 @@ def run_ridge_evaluation(
     alpha: float,
 ) -> dict[str, Any]:
     supervised_frame = _read_supervised_csv(supervised_csv)
+    for column in TIMESTAMP_COLUMNS:
+        if column in supervised_frame:
+            supervised_frame[column] = supervised_frame[column].dt.tz_convert(EVALUATION_TIMEZONE)
     splits = build_rolling_origin_splits(
         supervised_frame,
         validation_months=validation_months,

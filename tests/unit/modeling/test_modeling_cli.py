@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from urbanflow.modeling.cli import main
+from urbanflow.modeling.cli import _read_supervised_csv, main
 
 
 def supervised_rows() -> pd.DataFrame:
@@ -67,6 +67,25 @@ def write_supervised_csv(tmp_path: Path) -> Path:
     path = tmp_path / "supervised_rows.csv"
     supervised_rows().to_csv(path, index=False)
     return path
+
+
+def test_ridge_csv_reader_normalizes_mixed_dst_offsets_to_utc(tmp_path: Path) -> None:
+    path = tmp_path / "dst_offsets.csv"
+    path.write_text(
+        "forecast_origin_at,target_observed_at\n"
+        "2025-04-06T01:30:00+11:00,2025-04-06T02:30:00+11:00\n"
+        "2025-04-06T02:30:00+10:00,2025-04-06T03:30:00+10:00\n",
+        encoding="utf-8",
+    )
+
+    frame = _read_supervised_csv(path)
+
+    assert str(frame["forecast_origin_at"].dtype) == "datetime64[ns, UTC]"
+    assert str(frame["target_observed_at"].dtype) == "datetime64[ns, UTC]"
+    assert frame["forecast_origin_at"].tolist() == [
+        pd.Timestamp("2025-04-05T14:30:00Z"),
+        pd.Timestamp("2025-04-05T16:30:00Z"),
+    ]
 
 
 def assert_finite_metric(value: object) -> None:
