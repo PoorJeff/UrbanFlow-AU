@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-09T05:37:57.1979701Z",
+  "scope": {
+    "location_id": 1,
+    "sensor_name": "Bou292_T",
+    "sensor_description": "Bourke Street Mall (North)",
+    "sensor_status": "A",
+    "start_date": "2025-01-01",
+    "end_date": "2025-05-31"
+  },
+  "source_snapshot": {
+    "manifest": "hourly_counts_manifest.json",
+    "hourly_validation_report": "hourly_counts_validation.json",
+    "sensor_validation_report": "sensor_locations_validation.json",
+    "record_count": 3624,
+    "unique_sensor_hour_count": 3624,
+    "duplicate_sensor_hour_count": 0,
+    "contiguous_hour_count": 3624,
+    "continuous_hours_at_serving_cutoff": 168,
+    "snapshot_sha256": "af476626b09b0b967553b709d7343f648c70f995228f6a8cc3fa02a1ba7f3fa3",
+    "validation_passed": true,
+    "validation_error_count": 0,
+    "validation_warning_count": 0
+  },
+  "modeling": {
+    "evaluation_summary": "evaluation_summary.json",
+    "final_test_window": "final_test_2025-05",
+    "final_test_row_count": 17856,
+    "seasonal_naive_wape": 0.1114147481054734,
+    "ridge_wape": 0.30127112544244655,
+    "lightgbm_wape": 0.08757712067364201,
+    "lightgbm_relative_wape_improvement": 0.21395396782897125
+  },
+  "serving_artifact": {
+    "manifest": "serving_artifact_manifest.json",
+    "model_name": "lightgbm",
+    "model_version": "lightgbm-887517f7e42d",
+    "model_sha256": "887517f7e42dca4f5d602b87a66afbd71c33ee02fad645017cc6c272aed650f3",
+    "training_data_sha256": "821e93393a1985a26c0d1837b7b2876b557011cb1ffc398ba400bbd546793abd",
+    "training_row_count": 86676,
+    "trained_through_at": "2025-05-31T12:00:00+00:00"
+  },
+  "database": {
+    "engine": "PostgreSQL 17.10",
+    "listener": "127.0.0.1:55432",
+    "sensor_row_count": 134,
+    "hourly_row_count": 3624,
+    "location_1_hourly_row_count": 3624
+  },
+  "api": {
+    "health_http_status": 200,
+    "health_status": "degraded",
+    "api_process_status": "available",
+    "model_provider_status": "available",
+    "data_store_status": "available",
+    "data_freshness_status": "unconfigured",
+    "history_returned_count": 168,
+    "forecast_horizon_count": 24,
+    "forecast_minimum_predicted_count": 40.6318281491933,
+    "forecast_maximum_predicted_count": 2663.407623091965,
+    "forecast_first_target_at": "2025-06-01T00:00:00+10:00",
+    "forecast_last_target_at": "2025-06-01T23:00:00+10:00",
+    "metrics_model_version": null
+  },
+  "dashboard": {
+    "browser_qa_console_error_count": 0,
+    "browser_qa_failed_request_count": 0,
+    "screenshots": {
+      "today": "../../assets/real-data-local-serving/today.png",
+      "explore": "../../assets/real-data-local-serving/explore.png",
+      "forecast": "../../assets/real-data-local-serving/forecast.png"
+    }
+  },
+  "claim_boundary": "Local reproducible demonstration only; no production performance claim."
+}

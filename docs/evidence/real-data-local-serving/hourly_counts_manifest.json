@@ -1,0 +1,33 @@
+{
+  "dataset": "hourly_counts",
+  "extracted_at": "20260809T050754Z",
+  "metadata": {
+    "date_range": {
+      "end": "2025-05-31",
+      "start": "2025-01-01"
+    },
+    "selected_columns": [
+      "id",
+      "location_id",
+      "sensing_date",
+      "hourday",
+      "direction_1",
+      "direction_2",
+      "pedestriancount",
+      "sensor_name",
+      "location"
+    ],
+    "sensor_filter": {
+      "location_id": 1
+    },
+    "snapshot_format": "csv",
+    "source_dataset": "pedestrian-counting-system-monthly-counts-per-hour",
+    "source_where": "sensing_date >= date'2025-01-01' AND sensing_date <= date'2025-05-31' AND location_id = 1"
+  },
+  "record_count": 3624,
+  "schema_version": 1,
+  "snapshot_path": "data/raw/melbourne/hourly_counts/extracted_at=20260809T050754Z/records.csv",
+  "snapshot_sha256": "af476626b09b0b967553b709d7343f648c70f995228f6a8cc3fa02a1ba7f3fa3",
+  "source_total_count": 3624,
+  "source_url": "https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/pedestrian-counting-system-monthly-counts-per-hour/exports/csv"
+}

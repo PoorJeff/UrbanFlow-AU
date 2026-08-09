@@ -2,13 +2,14 @@
 
 UrbanFlow AU is an end-to-end platform for forecasting hourly pedestrian demand at selected City of Melbourne sensor locations. It will connect reproducible public-data ingestion, leakage-safe time-series evaluation, model serving, an operations dashboard, and MLOps monitoring.
 
-> **Project status:** foundation, local-baseline, first FastAPI serving
-> boundary, and initial Streamlit operations views. Local ingestion,
+> **Project status:** foundation, local-baseline, FastAPI serving boundary,
+> Streamlit operations views, and one reproducible real-data local demo. Local ingestion,
 > persistence, feature-building, baseline evaluation, reporting, MLflow
 > tracking, typed API reads, and guided `Today`, `Explore`, and `Forecast`
-> views are in place. PostgreSQL-backed reads and trusted local LightGBM
-> artifact forecasts are opt-in; Evidently monitoring, deployment/packaging,
-> and production forecasting performance claims are not in place.
+> views are in place. The checked-in demo evidence proves PostgreSQL-backed
+> reads and a trusted local LightGBM artifact forecast for Melbourne
+> `location_id=1`; Evidently monitoring, deployment/packaging, and production
+> forecasting performance claims are not in place.
 
 ## Requirements
 
@@ -35,6 +36,20 @@ python -m ruff check .
 python -m ruff format --check .
 python -m pytest
 ```
+
+## Verified real-data local demo
+
+The repository includes compact evidence for a local end-to-end run using
+3,624 official hourly observations for `location_id=1`, Bourke Street Mall
+(North), from 2025-01-01 through 2025-05-31. The May final test measured WAPE
+of 11.14% for Seasonal Naive, 30.13% for Ridge, and 8.76% for LightGBM. These
+are historical single-sensor results, not production accuracy claims.
+
+See the [complete reproduction runbook](docs/demos/real-data-local-serving.md),
+[evidence manifest](docs/evidence/real-data-local-serving/evidence.json), and
+the configured [Today](docs/assets/real-data-local-serving/today.png),
+[Explore](docs/assets/real-data-local-serving/explore.png), and
+[Forecast](docs/assets/real-data-local-serving/forecast.png) screenshots.
 
 ## Run the FastAPI API boundary
 

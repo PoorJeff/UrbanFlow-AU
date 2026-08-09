@@ -1,0 +1,44 @@
+{
+  "dataset": "hourly_counts",
+  "errors": [],
+  "metrics": {
+    "date_range": {
+      "end": "2025-05-31",
+      "start": "2025-01-01"
+    },
+    "hour_distribution": {
+      "0": 151,
+      "1": 151,
+      "10": 151,
+      "11": 151,
+      "12": 151,
+      "13": 151,
+      "14": 151,
+      "15": 151,
+      "16": 151,
+      "17": 151,
+      "18": 151,
+      "19": 151,
+      "2": 151,
+      "20": 151,
+      "21": 151,
+      "22": 151,
+      "23": 151,
+      "3": 151,
+      "4": 151,
+      "5": 151,
+      "6": 151,
+      "7": 151,
+      "8": 151,
+      "9": 151
+    },
+    "row_count": 3624,
+    "sensor_count": 1
+  },
+  "passed": true,
+  "row_count": 3624,
+  "schema_version": 1,
+  "snapshot_path": "data\\raw\\melbourne\\hourly_counts\\extracted_at=20260809T050754Z\\records.csv",
+  "validated_at": "2026-08-09T05:07:59.115575Z",
+  "warnings": []
+}

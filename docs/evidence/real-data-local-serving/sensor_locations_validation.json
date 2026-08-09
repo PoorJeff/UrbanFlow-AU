@@ -1,0 +1,17 @@
+{
+  "dataset": "sensor_locations",
+  "errors": [],
+  "metrics": {
+    "null_installation_date_count": 1,
+    "sensor_count": 134,
+    "status_distribution": {
+      "A": 134
+    }
+  },
+  "passed": true,
+  "row_count": 134,
+  "schema_version": 1,
+  "snapshot_path": "data\\raw\\melbourne\\sensor_locations\\extracted_at=20260809T050751Z\\records.json",
+  "validated_at": "2026-08-09T05:07:58.815934Z",
+  "warnings": []
+}
