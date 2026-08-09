@@ -174,6 +174,7 @@ def ingest_hourly_counts_task(
     raw_root_dir: Path,
     manifest_root_dir: Path,
     date_range: HourlyCountDateRange,
+    location_id: int | None = None,
     api_client_factory: HourlyApiClientFactory | None = None,
 ) -> HourlyCountIngestionResult:
     factory = api_client_factory or _default_hourly_api_client_factory
@@ -183,6 +184,7 @@ def ingest_hourly_counts_task(
             raw_root_dir=raw_root_dir,
             manifest_root_dir=manifest_root_dir,
             date_range=date_range,
+            location_id=location_id,
         )
 
 
@@ -225,6 +227,7 @@ def run_ingestion_flow(
     year: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    location_id: int | None = None,
     page_limit: int = 100,
     load_to_database: bool = False,
     database_url: str | None = None,
@@ -250,6 +253,7 @@ def run_ingestion_flow(
         raw_root_dir=raw_root_dir,
         manifest_root_dir=manifest_root_dir,
         date_range=date_range,
+        location_id=location_id,
         api_client_factory=hourly_api_client_factory,
     )
 

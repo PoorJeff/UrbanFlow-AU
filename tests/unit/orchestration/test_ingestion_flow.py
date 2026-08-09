@@ -92,7 +92,14 @@ def test_run_ingestion_flow_validates_snapshots_without_database(monkeypatch, tm
         return sensor_result(tmp_path)
 
     def fake_ingest_hourly_counts_task(**kwargs):
-        calls.append(("hourly_ingest", kwargs["raw_root_dir"], kwargs["date_range"]))
+        calls.append(
+            (
+                "hourly_ingest",
+                kwargs["raw_root_dir"],
+                kwargs["date_range"],
+                kwargs["location_id"],
+            )
+        )
         return hourly_result(tmp_path, kwargs["date_range"])
 
     def fake_validate_snapshot_task(dataset, snapshot_path, *, report_root_dir):
@@ -142,7 +149,7 @@ def test_run_ingestion_flow_validates_snapshots_without_database(monkeypatch, tm
     assert result.database_loads == ()
     assert calls == [
         ("sensor_ingest", tmp_path / "raw", 25),
-        ("hourly_ingest", tmp_path / "raw", expected_date_range),
+        ("hourly_ingest", tmp_path / "raw", expected_date_range, None),
         (
             "validate",
             "sensor_locations",
@@ -156,6 +163,76 @@ def test_run_ingestion_flow_validates_snapshots_without_database(monkeypatch, tm
             tmp_path / "reports",
         ),
     ]
+
+
+def test_run_ingestion_flow_passes_location_id_to_hourly_task(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_ingest_sensor_locations_task(**kwargs):
+        return sensor_result(tmp_path)
+
+    def fake_ingest_hourly_counts_task(**kwargs):
+        calls.append(kwargs["location_id"])
+        return hourly_result(tmp_path, kwargs["date_range"])
+
+    def fake_validate_snapshot_task(dataset, snapshot_path, *, report_root_dir):
+        return validation_report(dataset, snapshot_path)
+
+    monkeypatch.setattr(
+        ingestion_flow,
+        "ingest_sensor_locations_task",
+        fake_ingest_sensor_locations_task,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "ingest_hourly_counts_task",
+        fake_ingest_hourly_counts_task,
+    )
+    monkeypatch.setattr(
+        ingestion_flow,
+        "validate_snapshot_task",
+        fake_validate_snapshot_task,
+    )
+
+    ingestion_flow.run_ingestion_flow.fn(
+        raw_root_dir=tmp_path / "raw",
+        manifest_root_dir=tmp_path / "manifests",
+        report_root_dir=tmp_path / "reports",
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 5, 31),
+        location_id=1,
+    )
+
+    assert calls == [1]
+
+
+def test_ingest_hourly_counts_task_passes_location_id_to_pipeline(monkeypatch, tmp_path):
+    calls = {}
+    date_range = HourlyCountDateRange(
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 5, 31),
+    )
+
+    def fake_ingest_hourly_counts(**kwargs):
+        calls.update(kwargs)
+        return hourly_result(tmp_path, kwargs["date_range"])
+
+    monkeypatch.setattr(
+        ingestion_flow,
+        "ingest_hourly_counts",
+        fake_ingest_hourly_counts,
+    )
+
+    ingestion_flow.ingest_hourly_counts_task.fn(
+        raw_root_dir=tmp_path / "raw",
+        manifest_root_dir=tmp_path / "manifests",
+        date_range=date_range,
+        location_id=1,
+        api_client_factory=lambda http_client: "api-client",
+    )
+
+    assert calls["location_id"] == 1
+    assert calls["api_client"] == "api-client"
 
 
 def test_run_ingestion_flow_stops_on_validation_failure(monkeypatch, tmp_path):

@@ -286,6 +286,16 @@ hourly-count ingestion, and snapshot validation. It writes raw snapshots below
 `data/raw/`, manifests below `data/manifests/`, and validation reports below
 `reports/data_quality/`.
 
+Use the same explicit location scope as the standalone hourly-count command
+when preparing a manageable single-sensor modeling run:
+
+```powershell
+python scripts/run_ingestion_flow.py `
+  --start-date 2025-01-01 `
+  --end-date 2025-05-31 `
+  --location-id 1
+```
+
 To also load the generated snapshots into PostgreSQL, run migrations first and
 pass a database URL explicitly or through `URBANFLOW_DATABASE_URL`:
 

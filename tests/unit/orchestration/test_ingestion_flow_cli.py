@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from urbanflow.orchestration import cli
 from urbanflow.orchestration.ingestion_flow import (
     DatabaseFlowResult,
@@ -80,10 +82,44 @@ def test_ingestion_flow_cli_runs_flow_without_database(monkeypatch, tmp_path, ca
     assert calls["year"] == 2025
     assert calls["start_date"] is None
     assert calls["end_date"] is None
+    assert calls["location_id"] is None
     assert calls["page_limit"] == 25
     assert calls["load_to_database"] is False
     assert calls["database_url"] is None
     assert json.loads(capsys.readouterr().out)["hourly_counts"]["record_count"] == 3
+
+
+def test_ingestion_flow_cli_passes_location_id_to_flow(monkeypatch, capsys):
+    calls = {}
+
+    def fake_run_ingestion_flow(**kwargs):
+        calls.update(kwargs)
+        return flow_result()
+
+    monkeypatch.setattr(cli, "run_ingestion_flow", fake_run_ingestion_flow)
+
+    exit_code = cli.main(
+        [
+            "--start-date",
+            "2025-01-01",
+            "--end-date",
+            "2025-05-31",
+            "--location-id",
+            "1",
+        ],
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert calls["location_id"] == 1
+    assert json.loads(capsys.readouterr().out)["hourly_counts"]["record_count"] == 3
+
+
+def test_ingestion_flow_cli_rejects_non_positive_location_id():
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--year", "2025", "--location-id", "0"], environ={})
+
+    assert exc_info.value.code == 2
 
 
 def test_ingestion_flow_cli_requires_database_url_when_loading(capsys):
@@ -126,3 +162,4 @@ def test_ingestion_flow_script_help() -> None:
     )
 
     assert "Run the UrbanFlow AU Prefect ingestion flow" in result.stdout
+    assert "--location-id" in result.stdout

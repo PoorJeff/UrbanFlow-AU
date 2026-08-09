@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--year", type=int)
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
+    parser.add_argument("--location-id", type=positive_integer)
     parser.add_argument("--page-limit", type=positive_integer, default=100)
     parser.add_argument("--load-to-database", action="store_true")
     parser.add_argument("--database-url", default=None)
@@ -97,6 +98,7 @@ def main(
             year=args.year,
             start_date=start_date,
             end_date=end_date,
+            location_id=args.location_id,
             page_limit=args.page_limit,
             load_to_database=args.load_to_database,
             database_url=resolved_database_url,
